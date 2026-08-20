@@ -93,7 +93,7 @@ python scripts/benchmark_latency.py
 
 ---
 
-##  Limitações & Próximos Passos
+##  Limitações & Possíveis Melhorias
 O formato NIF é um projeto experimental de pesquisa em compressão neural de imagens e possui as seguintes limitações conhecidas:
 1. **Curva RD Fina**: Atualmente, a curva de taxa-distorção apresenta modulação estreita (*Conditioning Collapse*) na variação de qualidade $q$. Para apresentações profissionais, recomenda-se a aplicação de *Positional Encoding* no parâmetro de qualidade $q$ e taxas de aprendizado maiores na MLP de condicionamento na próxima sessão de treino.
 2. **Dependência de Checkpoints**: Assim como todo formato neural, a descompressão requer exatamente o mesmo modelo e pesos de treino que comprimiram a imagem.
