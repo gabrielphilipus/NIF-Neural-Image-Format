@@ -5,6 +5,41 @@ from compressai.entropy_models import EntropyBottleneck
 from compressai.layers import GDN
 from .entropy_model import ChannelCheckerboardEntropyModel
 
+class ResidualBlock(nn.Module):
+    """
+    Bloco residual simples para o filtro de loop neural.
+    """
+    def __init__(self, channels):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        )
+        
+    def forward(self, x):
+        return x + self.conv(x)
+
+
+class NeuralLoopFilter(nn.Module):
+    """
+    Neural Loop Filter (NLF) leve para refinamento de reconstrução e remoção de artefatos.
+    Aplica aprendizado residual direto na imagem reconstruída.
+    """
+    def __init__(self, in_channels=3, num_features=32, num_blocks=3):
+        super().__init__()
+        self.in_conv = nn.Conv2d(in_channels, num_features, kernel_size=3, padding=1)
+        self.blocks = nn.Sequential(*[
+            ResidualBlock(num_features) for _ in range(num_blocks)
+        ])
+        self.out_conv = nn.Conv2d(num_features, in_channels, kernel_size=3, padding=1)
+        
+    def forward(self, x):
+        res = self.in_conv(x)
+        res = self.blocks(res)
+        res = self.out_conv(res)
+        return x + res
+
 class QualityConditioningNetwork(nn.Module):
     """
     Rede MLP que converte o parâmetro de qualidade 'q' (0.1 a 1.0)
@@ -117,6 +152,9 @@ class NIFCodec(CompressionModel):
         self.dec_deconv4 = nn.ConvTranspose2d(num_filters, 3, kernel_size=5, stride=2, padding=2, output_padding=1)
         self.dec_film4 = FiLMBlock()
 
+        # 7. Filtro de Loop Neural (Neural Loop Filter)
+        self.loop_filter = NeuralLoopFilter(in_channels=3, num_features=32, num_blocks=3)
+
     def compute_structural_mask(self, x):
         """
         Gera um mapa de densidade de alta frequência (bordas) para identificar
@@ -202,7 +240,8 @@ class NIFCodec(CompressionModel):
         y_d3 = self.dec_film3(self.dec_igdn3(self.dec_deconv3(y_d2)), scale_d3, bias_d3)
 
         scale_d4, bias_d4 = self.cond_dec4(quality)
-        x_hat = self.dec_film4(self.dec_deconv4(y_d3), scale_d4, bias_d4)
+        x_raw = self.dec_film4(self.dec_deconv4(y_d3), scale_d4, bias_d4)
+        x_hat = self.loop_filter(x_raw)
 
         return {
             "x_hat": x_hat,
@@ -305,7 +344,8 @@ class NIFCodec(CompressionModel):
         y_d3 = self.dec_film3(self.dec_igdn3(self.dec_deconv3(y_d2)), scale_d3, bias_d3)
 
         scale_d4, bias_d4 = self.cond_dec4(quality)
-        x_hat = self.dec_film4(self.dec_deconv4(y_d3), scale_d4, bias_d4)
+        x_raw = self.dec_film4(self.dec_deconv4(y_d3), scale_d4, bias_d4)
+        x_hat = self.loop_filter(x_raw)
 
         return {
             "x_hat": x_hat
