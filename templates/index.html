@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NIF - Neural Image Format Dashboard</title>
+    <!-- Google Fonts: Outfit -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0b0f19;
+            --bg-secondary: #131a2d;
+            --accent-primary: #4f46e5;
+            --accent-glow: rgba(79, 70, 229, 0.4);
+            --accent-secondary: #06b6d4;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --glass-bg: rgba(30, 41, 59, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --success: #10b981;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.1) 0px, transparent 50%);
+            background-attachment: fixed;
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        /* Container & Grid layout */
+        header {
+            padding: 2rem 5%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--glass-border);
+            backdrop-filter: blur(10px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(11, 15, 25, 0.7);
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1.2rem;
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+
+        .logo-text h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(to right, #ffffff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-text p {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .tabs {
+            display: flex;
+            background: rgba(15, 23, 42, 0.6);
+            padding: 4px;
+            border-radius: 12px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .tab-btn.active {
+            background: var(--accent-primary);
+            color: var(--text-primary);
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4);
+        }
+
+        main {
+            flex: 1;
+            padding: 3rem 5%;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .panel {
+            display: none;
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+
+        .panel.active {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2.5rem;
+        }
+
+        @media (max-width: 1024px) {
+            .panel.active {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Glass Cards */
+        .card {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 2.5rem;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            transition: border 0.3s ease;
+        }
+
+        .card:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .card h2 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.5px;
+        }
+
+        .card p.description {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-bottom: 2rem;
+            line-height: 1.5;
+        }
+
+        /* Upload Zone */
+        .dropzone {
+            border: 2px dashed rgba(255, 255, 255, 0.15);
+            border-radius: 16px;
+            padding: 3rem 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: rgba(15, 23, 42, 0.2);
+            position: relative;
+        }
+
+        .dropzone:hover, .dropzone.dragover {
+            border-color: var(--accent-primary);
+            background: rgba(79, 70, 229, 0.05);
+            box-shadow: 0 0 25px rgba(79, 70, 229, 0.1) inset;
+        }
+
+        .dropzone-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            display: inline-block;
+            transition: transform 0.3s ease;
+        }
+
+        .dropzone:hover .dropzone-icon {
+            transform: translateY(-5px);
+        }
+
+        .dropzone p {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .dropzone span {
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .file-info {
+            display: none;
+            align-items: center;
+            gap: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px 20px;
+            border-radius: 12px;
+            margin-top: 1.5rem;
+            border: 1px solid var(--glass-border);
+        }
+
+        .file-info-text {
+            flex: 1;
+            text-align: left;
+        }
+
+        .file-name {
+            font-weight: 600;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 250px;
+        }
+
+        .file-size {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .remove-file {
+            background: transparent;
+            border: none;
+            color: #ef4444;
+            font-size: 1.2rem;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        /* Slider Controls */
+        .control-group {
+            margin-top: 2rem;
+        }
+
+        .control-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .control-header label {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .quality-badge {
+            background: rgba(6, 182, 212, 0.15);
+            color: var(--accent-secondary);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            border: 1px solid rgba(6, 182, 212, 0.3);
+        }
+
+        .slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            outline: none;
+            transition: background 0.3s;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--accent-secondary);
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+            transition: transform 0.1s;
+        }
+
+        .slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            border: none;
+            color: white;
+            border-radius: 14px;
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-top: 2rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(79, 70, 229, 0.3);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-submit:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(79, 70, 229, 0.45);
+        }
+
+        .btn-submit:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Results / Viewer Card */
+        .viewer-card {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
+            min-height: 450px;
+        }
+
+        .placeholder-viewer {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 3rem;
+        }
+
+        .placeholder-icon {
+            font-size: 4rem;
+            opacity: 0.15;
+            margin-bottom: 1rem;
+        }
+
+        /* Slide-to-compare container */
+        .comparison-slider-container {
+            width: 100%;
+            position: relative;
+            overflow: hidden;
+            border-radius: 16px;
+            border: 1px solid var(--glass-border);
+            aspect-ratio: 16/10;
+            display: none;
+        }
+
+        .image-compare {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #080c14;
+        }
+
+        .image-compare img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            user-select: none;
+            pointer-events: none;
+        }
+
+        .image-compare-overlay {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #080c14;
+        }
+
+        .image-compare-overlay img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            user-select: none;
+            pointer-events: none;
+        }
+
+        /* The vertical slider bar */
+        .slider-handle {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: #ffffff;
+            left: 50%;
+            cursor: ew-resize;
+            z-index: 10;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .slider-button {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            background: #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--bg-primary);
+            font-weight: bold;
+            font-size: 1.1rem;
+            user-select: none;
+            pointer-events: none;
+        }
+
+        .label-orig, .label-rec {
+            position: absolute;
+            bottom: 12px;
+            padding: 4px 10px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            z-index: 5;
+            letter-spacing: 0.5px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .label-orig {
+            left: 12px;
+        }
+
+        .label-rec {
+            right: 12px;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: none;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 1.5rem;
+        }
+
+        .stat-card {
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 14px;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .stat-value.highlight {
+            color: var(--accent-secondary);
+        }
+
+        .stat-value.success {
+            color: var(--success);
+        }
+
+        /* Download section */
+        .action-footer {
+            display: none;
+            margin-top: 1.5rem;
+        }
+
+        .btn-download {
+            width: 100%;
+            padding: 12px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            font-weight: 600;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+
+        .btn-download:hover {
+            background: rgba(255,255,255,0.12);
+            border-color: rgba(255,255,255,0.25);
+        }
+
+        /* Loader */
+        .loader {
+            display: none;
+            border: 3px solid rgba(255,255,255,0.05);
+            border-radius: 50%;
+            border-top: 3px solid var(--accent-secondary);
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+
+        /* Animations */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            border-top: 1px solid var(--glass-border);
+            margin-top: 3rem;
+            background: rgba(11, 15, 25, 0.4);
+        }
+
+        footer a {
+            color: var(--accent-secondary);
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo-container">
+            <div class="logo-icon">NIF</div>
+            <div class="logo-text">
+                <h1>Neural Image Format</h1>
+                <p>NIF Codec v1.0.0 (300 Epochs)</p>
+            </div>
+        </div>
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('compress')">Compactar</button>
+            <button class="tab-btn" onclick="switchTab('decompress')">Descompactar</button>
+        </div>
+    </header>
+
+    <main>
+        <!-- Panel 1: Compress -->
+        <div id="compress-panel" class="panel active">
+            <div class="card">
+                <h2>Compactação de Imagem</h2>
+                <p class="description">Selecione uma imagem local para codificá-la usando a rede neural convolucional. Ajuste o fator de qualidade para ver o efeito na taxa de bits e no tamanho do arquivo.</p>
+                
+                <form id="compress-form" onsubmit="handleCompress(event)">
+                    <div class="dropzone" id="dropzone-c" onclick="document.getElementById('file-c').click()">
+                        <p>Arraste e solte sua imagem ou clique para navegar</p>
+                        <span>Formatos: PNG, JPG, JPEG, BMP</span>
+                        <input type="file" id="file-c" class="file-input" accept="image/*" onchange="fileSelected('c')">
+                    </div>
+
+                    <div class="file-info" id="file-info-c">
+                        <div class="file-info-text">
+                            <div class="file-name" id="file-name-c">-</div>
+                            <div class="file-size" id="file-size-c">-</div>
+                        </div>
+                        <button type="button" class="remove-file" onclick="removeFile('c')">×</button>
+                    </div>
+
+                    <div class="control-group">
+                        <div class="control-header">
+                            <label for="quality">Fator de Qualidade (q)</label>
+                            <span class="quality-badge" id="quality-val">0.50</span>
+                        </div>
+                        <input type="range" id="quality" name="quality" class="slider" min="0.1" max="1.0" step="0.05" value="0.5" oninput="document.getElementById('quality-val').innerText = parseFloat(this.value).toFixed(2)">
+                    </div>
+
+                    <button type="submit" class="btn-submit" id="btn-submit-c" disabled>
+                        <div class="loader" id="loader-c"></div>
+                        <span id="btn-text-c">Compactar Imagem</span>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Viewer -->
+            <div class="card viewer-card">
+                <div class="placeholder-viewer" id="placeholder-c">
+                    <h3>Pré-visualização Interativa</h3>
+                    <p>Compacte uma imagem para habilitar o comparador deslizante e as estatísticas do codec.</p>
+                </div>
+
+                <div class="comparison-slider-container" id="slider-container-c">
+                    <div class="image-compare">
+                        <img id="img-orig-c" src="" alt="Original">
+                        <div class="label-orig">ORIGINAL</div>
+                    </div>
+                    <div class="image-compare-overlay" id="compare-overlay-c">
+                        <img id="img-rec-c" src="" alt="Reconstructed">
+                        <div class="label-rec">NIF RECONSTRUÍDO</div>
+                    </div>
+                    <div class="slider-handle" id="slider-handle-c">
+                        <div class="slider-button">↔</div>
+                    </div>
+                </div>
+
+                <div class="stats-grid" id="stats-c">
+                    <div class="stat-card">
+                        <div class="stat-label">Compressão</div>
+                        <div class="stat-value success" id="stat-ratio">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Taxa (Bpp)</div>
+                        <div class="stat-value highlight" id="stat-bpp">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Fidelidade (PSNR)</div>
+                        <div class="stat-value" id="stat-psnr">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Estrutura (SSIM)</div>
+                        <div class="stat-value" id="stat-ssim">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Tamanho Orig.</div>
+                        <div class="stat-value" id="stat-orig-size">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Tamanho NIF</div>
+                        <div class="stat-value" id="stat-comp-size">-</div>
+                    </div>
+                </div>
+
+                <div class="action-footer" id="footer-c">
+                    <a href="" id="download-nif-btn" class="btn-download" download="imagem.nif">
+                        Baixar Arquivo .nif Comprimido
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panel 2: Decompress -->
+        <div id="decompress-panel" class="panel">
+            <div class="card">
+                <h2>Descompactação de Arquivo</h2>
+                <p class="description">Envie um arquivo de imagem binário comprimido (.nif) para reconstruí-lo usando o decodificador neural local.</p>
+                
+                <form id="decompress-form" onsubmit="handleDecompress(event)">
+                    <div class="dropzone" id="dropzone-d" onclick="document.getElementById('file-d').click()">
+                        <p>Arraste e solte seu arquivo .nif ou clique para navegar</p>
+                        <span>Formato: .nif</span>
+                        <input type="file" id="file-d" class="file-input" accept=".nif" onchange="fileSelected('d')">
+                    </div>
+
+                    <div class="file-info" id="file-info-d">
+                        <div class="file-info-text">
+                            <div class="file-name" id="file-name-d">-</div>
+                            <div class="file-size" id="file-size-d">-</div>
+                        </div>
+                        <button type="button" class="remove-file" onclick="removeFile('d')">×</button>
+                    </div>
+
+                    <button type="submit" class="btn-submit" id="btn-submit-d" disabled>
+                        <div class="loader" id="loader-d"></div>
+                        <span id="btn-text-d">Descompactar .nif</span>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Viewer -->
+            <div class="card viewer-card">
+                <div class="placeholder-viewer" id="placeholder-d">
+                    <h3>Imagem Reconstruída</h3>
+                    <p>Descompacte um arquivo .nif para renderizar a imagem final decodificada.</p>
+                </div>
+
+                <div class="comparison-slider-container" id="slider-container-d" style="aspect-ratio: auto; min-height: 250px; display:none;">
+                    <div class="image-compare">
+                        <img id="img-rec-d" src="" alt="Decoded Reconstructed" style="object-fit: contain;">
+                    </div>
+                </div>
+
+                <div class="stats-grid" id="stats-d" style="grid-template-columns: repeat(2, 1fr);">
+                    <div class="stat-card">
+                        <div class="stat-label">Resolução</div>
+                        <div class="stat-value highlight" id="stat-res-d">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Qualidade Recuperada</div>
+                        <div class="stat-value success" id="stat-q-d">-</div>
+                    </div>
+                    <div class="stat-card" style="grid-column: span 2;">
+                        <div class="stat-label">Tamanho Comprimido (.nif)</div>
+                        <div class="stat-value" id="stat-size-d">-</div>
+                    </div>
+                </div>
+
+                <div class="action-footer" id="footer-d">
+                    <a href="" id="download-png-btn" class="btn-download" download="reconstruida.png">
+                        Salvar como PNG
+                    </a>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>Desenvolvido localmente para testes do codec <strong>NIF (Neural Image Format)</strong>. Codificador baseado em Redes Neurais Convolucionais com Atenção e Filtro de Loop Residual.</p>
+    </footer>
+
+    <script>
+        // Tab switching
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.panel').forEach(panel => panel.classList.remove('active'));
+            
+            if (tab === 'compress') {
+                document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+                document.getElementById('compress-panel').classList.add('active');
+            } else {
+                document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+                document.getElementById('decompress-panel').classList.add('active');
+            }
+        }
+
+        // Drag and drop events
+        ['c', 'd'].forEach(type => {
+            const dropzone = document.getElementById(`dropzone-${type}`);
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropzone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    dropzone.classList.add('dragover');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropzone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    dropzone.classList.remove('dragover');
+                }, false);
+            });
+
+            dropzone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length > 0) {
+                    document.getElementById(`file-${type}`).files = files;
+                    fileSelected(type);
+                }
+            }, false);
+        });
+
+        // File Selection Handlers
+        function fileSelected(type) {
+            const fileInput = document.getElementById(`file-${type}`);
+            const dropzone = document.getElementById(`dropzone-${type}`);
+            const fileInfo = document.getElementById(`file-info-${type}`);
+            const fileName = document.getElementById(`file-name-${type}`);
+            const fileSize = document.getElementById(`file-size-${type}`);
+            const btnSubmit = document.getElementById(`btn-submit-${type}`);
+
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                fileName.innerText = file.name;
+                fileSize.innerText = `${(file.size / 1024.0).toFixed(2)} KB`;
+                
+                dropzone.style.display = 'none';
+                fileInfo.style.display = 'flex';
+                btnSubmit.removeAttribute('disabled');
+            }
+        }
+
+        function removeFile(type) {
+            const fileInput = document.getElementById(`file-${type}`);
+            const dropzone = document.getElementById(`dropzone-${type}`);
+            const fileInfo = document.getElementById(`file-info-${type}`);
+            const btnSubmit = document.getElementById(`btn-submit-${type}`);
+
+            fileInput.value = '';
+            dropzone.style.display = 'block';
+            fileInfo.style.display = 'none';
+            btnSubmit.setAttribute('disabled', 'true');
+            
+            // Clean up viewers
+            document.getElementById(`placeholder-${type}`).style.display = 'block';
+            document.getElementById(`slider-container-${type}`).style.display = 'none';
+            document.getElementById(`stats-${type}`).style.display = 'none';
+            document.getElementById(`footer-${type}`).style.display = 'none';
+        }
+
+        // Slide compare logic
+        function initSlider() {
+            const container = document.getElementById('slider-container-c');
+            const overlay = document.getElementById('compare-overlay-c');
+            const handle = document.getElementById('slider-handle-c');
+            let clicked = false;
+
+            function slide(x) {
+                const rect = container.getBoundingClientRect();
+                let position = x - rect.left;
+                if (position < 0) position = 0;
+                if (position > rect.width) position = rect.width;
+
+                const percent = (position / rect.width) * 100;
+                overlay.style.width = `${percent}%`;
+                handle.style.left = `${percent}%`;
+            }
+
+            container.addEventListener('mousedown', (e) => {
+                clicked = true;
+                slide(e.clientX);
+            });
+
+            window.addEventListener('mouseup', () => {
+                clicked = false;
+            });
+
+            container.addEventListener('mousemove', (e) => {
+                if (!clicked) return;
+                slide(e.clientX);
+            });
+
+            // Touch events
+            container.addEventListener('touchstart', (e) => {
+                clicked = true;
+                slide(e.touches[0].clientX);
+            });
+
+            window.addEventListener('touchend', () => {
+                clicked = false;
+            });
+
+            container.addEventListener('touchmove', (e) => {
+                if (!clicked) return;
+                slide(e.touches[0].clientX);
+            });
+        }
+
+        // API calls
+        function handleCompress(e) {
+            e.preventDefault();
+            const fileInput = document.getElementById('file-c');
+            const qualityInput = document.getElementById('quality');
+            const loader = document.getElementById('loader-c');
+            const btnText = document.getElementById('btn-text-c');
+            const btnSubmit = document.getElementById('btn-submit-c');
+
+            if (fileInput.files.length === 0) return;
+
+            const formData = new FormData();
+            formData.append('image', fileInput.files[0]);
+            formData.append('quality', qualityInput.value);
+
+            // Loader active
+            loader.style.display = 'block';
+            btnText.innerText = 'Compactando...';
+            btnSubmit.setAttribute('disabled', 'true');
+
+            fetch('/compress', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+
+                // Show UI elements
+                document.getElementById('placeholder-c').style.display = 'none';
+                document.getElementById('slider-container-c').style.display = 'block';
+                document.getElementById('stats-c').style.display = 'grid';
+                document.getElementById('footer-c').style.display = 'block';
+
+                // Set images
+                document.getElementById('img-orig-c').src = `data:image/png;base64,${data.orig_img}`;
+                document.getElementById('img-rec-c').src = `data:image/png;base64,${data.rec_img}`;
+
+                // Set Stats
+                document.getElementById('stat-ratio').innerText = `${data.ratio}x`;
+                document.getElementById('stat-bpp').innerText = data.bpp;
+                document.getElementById('stat-psnr').innerText = `${data.psnr} dB`;
+                document.getElementById('stat-ssim').innerText = data.msssim;
+                document.getElementById('stat-orig-size').innerText = `${data.orig_size_kb} KB`;
+                document.getElementById('stat-comp-size').innerText = `${data.comp_size_kb} KB`;
+
+                // Set Download btn
+                const dBtn = document.getElementById('download-nif-btn');
+                dBtn.href = `data:application/octet-stream;base64,${data.nif_file}`;
+                dBtn.download = data.filename;
+
+                // Reset overlay slider to 50%
+                document.getElementById('compare-overlay-c').style.width = '50%';
+                document.getElementById('slider-handle-c').style.left = '50%';
+
+                initSlider();
+            })
+            .catch(err => {
+                alert(`Erro na comunicação com o servidor: ${err}`);
+            })
+            .finally(() => {
+                loader.style.display = 'none';
+                btnText.innerText = 'Compactar Imagem';
+                btnSubmit.removeAttribute('disabled');
+            });
+        }
+
+        function handleDecompress(e) {
+            e.preventDefault();
+            const fileInput = document.getElementById('file-d');
+            const loader = document.getElementById('loader-d');
+            const btnText = document.getElementById('btn-text-d');
+            const btnSubmit = document.getElementById('btn-submit-d');
+
+            if (fileInput.files.length === 0) return;
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            // Loader active
+            loader.style.display = 'block';
+            btnText.innerText = 'Descompactando...';
+            btnSubmit.setAttribute('disabled', 'true');
+
+            fetch('/decompress', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+
+                // Show UI elements
+                document.getElementById('placeholder-d').style.display = 'none';
+                document.getElementById('slider-container-d').style.display = 'block';
+                document.getElementById('stats-d').style.display = 'grid';
+                document.getElementById('footer-d').style.display = 'block';
+
+                // Set Image
+                document.getElementById('img-rec-d').src = `data:image/png;base64,${data.rec_img}`;
+
+                // Set Stats
+                document.getElementById('stat-res-d').innerText = data.resolution;
+                document.getElementById('stat-q-d').innerText = data.quality.toFixed(2);
+                document.getElementById('stat-size-d').innerText = `${data.comp_size_kb} KB`;
+
+                // Set Download btn
+                const dBtn = document.getElementById('download-png-btn');
+                dBtn.href = `data:image/png;base64,${data.rec_img}`;
+                dBtn.download = fileInput.files[0].name.replace('.nif', '_reconstruida.png');
+            })
+            .catch(err => {
+                alert(`Erro na comunicação com o servidor: ${err}`);
+            })
+            .finally(() => {
+                loader.style.display = 'none';
+                btnText.innerText = 'Descompactar .nif';
+                btnSubmit.removeAttribute('disabled');
+            });
+        }
+    </script>
+</body>
+</html>
