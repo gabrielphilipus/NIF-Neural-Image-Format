@@ -129,7 +129,7 @@ def main():
 
     # Imprimir Cabeçalho dos Resultados
     print("\n" + "="*80)
-    print(f"{'Imagem':<20} | {'Qualidade q':<11} | {'Bpp (↓)':<10} | {'PSNR (↑)':<10} | {'MS-SSIM (↑)':<12} | {'LPIPS (↓)':<10}")
+    print(f"{'Imagem':<20} | {'Qualidade q':<11} | {'Bpp (v)':<10} | {'PSNR (^)':<10} | {'MS-SSIM (^)':<12} | {'LPIPS (v)':<10}")
     print("="*80)
 
     for img_path in images_to_eval:
