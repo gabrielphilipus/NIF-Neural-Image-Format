@@ -73,7 +73,7 @@ Em seguida, abra o navegador em: http://localhost:5000
 
 ---
 
-## ⚡ Latência & Custo Operacional (AWS g4dn.xlarge)
+##  Latência & Custo Operacional (AWS g4dn.xlarge)
 
 O script de benchmark mede a velocidade de compressão/descompressão do codec NIF e estima o custo para processar **1 Milhão de imagens** em uma instância de referência na nuvem (AWS EC2 `g4dn.xlarge`, custo de **$0.526 por hora**):
 
@@ -93,7 +93,7 @@ python scripts/benchmark_latency.py
 
 ---
 
-## ⚠️ Limitações & Próximos Passos
+##  Limitações & Próximos Passos
 O formato NIF é um projeto experimental de pesquisa em compressão neural de imagens e possui as seguintes limitações conhecidas:
 1. **Curva RD Fina**: Atualmente, a curva de taxa-distorção apresenta modulação estreita (*Conditioning Collapse*) na variação de qualidade $q$. Para apresentações profissionais, recomenda-se a aplicação de *Positional Encoding* no parâmetro de qualidade $q$ e taxas de aprendizado maiores na MLP de condicionamento na próxima sessão de treino.
 2. **Dependência de Checkpoints**: Assim como todo formato neural, a descompressão requer exatamente o mesmo modelo e pesos de treino que comprimiram a imagem.
