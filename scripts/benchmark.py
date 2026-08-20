@@ -1,6 +1,9 @@
 import argparse
-import json
+import sys
 import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+import json
 import torch
 import torch.nn as nn
 from torchvision import transforms

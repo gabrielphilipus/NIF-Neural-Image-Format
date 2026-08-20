@@ -1,4 +1,8 @@
 import unittest
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../scripts')))
 import torch
 import torch.nn as nn
 from src.models.entropy_model import MaskedConv2d, ChannelCheckerboardEntropyModel

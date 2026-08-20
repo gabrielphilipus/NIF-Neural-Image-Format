@@ -37,7 +37,7 @@ pip install Flask
 Para treinar o modelo do zero usando o dataset DIV2K:
 
 ```bash
-python train.py --dataset DIV2K_train_HR --epochs 300
+python scripts/train.py --dataset DIV2K_train_HR --epochs 300
 ```
 3. Compactação e Descompactação via CLI
 
@@ -53,6 +53,6 @@ python nif_tool.py decompress --checkpoint checkpoints/nif_epoch_300.pth --input
 
 Para iniciar a interface web:
 ```bash
-python dashboard.py
+python scripts/dashboard.py
 ```
 Em seguida, abra o navegador em: http://localhost:5000
