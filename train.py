@@ -144,7 +144,7 @@ class SafeResize(object):
 def main():
     parser = argparse.ArgumentParser(description="Pipeline de Treinamento NIF")
     parser.add_argument("--dataset", type=str, required=True, help="Caminho para o diretório de imagens de treino")
-    parser.add_argument("--epochs", type=int, default=50, help="Número de épocas")
+    parser.add_argument("--epochs", type=int, default=250, help="Número de épocas")
     parser.add_argument("--batch_size", type=int, default=8, help="Tamanho do lote (batch size)")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate inicial")
     parser.add_argument("--lambda_min", type=float, default=10.0, help="Lambda mínimo da curva RD")
@@ -193,7 +193,9 @@ def main():
     optimizer = optim.Adam(parameters, lr=args.lr)
     aux_optimizer = optim.Adam(aux_parameters, lr=1e-3)
 
-    lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[30, 45], gamma=0.1)
+    milestones = [int(args.epochs * 0.6), int(args.epochs * 0.88)]
+    lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+    print(f"Milestones do Scheduler (Decaimento LR): {milestones}")
 
     criterion = NIFLoss(use_lpips=not args.no_lpips, device=device)
 
