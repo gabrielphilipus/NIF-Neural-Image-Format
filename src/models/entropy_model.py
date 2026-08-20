@@ -1,7 +1,22 @@
 import torch
 import torch.nn as nn
-from compressai.entropy_models import GaussianConditional
+from compressai.entropy_models import GaussianMixtureConditional
 from compressai.layers import GDN
+import struct
+import numpy as np
+
+def pack_gmm_string(rv_bytes, abs_max, zero_bitmap):
+    zb_bytes = zero_bitmap.cpu().to(torch.uint8).numpy().tobytes()
+    header = struct.pack("!iH", abs_max, len(zb_bytes))
+    return header + zb_bytes + rv_bytes
+
+def unpack_gmm_string(packed_bytes, device):
+    abs_max, zb_len = struct.unpack("!iH", packed_bytes[:6])
+    zb_bytes = packed_bytes[6:6+zb_len]
+    rv_bytes = packed_bytes[6+zb_len:]
+    zb_np = np.frombuffer(zb_bytes, dtype=np.uint8).copy()
+    zero_bitmap = torch.from_numpy(zb_np).to(device).to(torch.long)
+    return rv_bytes, abs_max, zero_bitmap
 
 class MaskedConv2d(nn.Conv2d):
     """
@@ -68,23 +83,25 @@ def merge_checkerboard(anchors, non_anchors, H, W):
 
 class ChannelCheckerboardEntropyModel(nn.Module):
     """
-    Modelo de Entropia Híbrido: Channel-wise + Spatial Checkerboard.
+    Modelo de Entropia Híbrido: Channel-wise + Spatial Checkerboard baseada em GMM.
     Divide o latente 'y' em fatias de canais (slices). Para cada fatia:
     1. Prediz as âncoras (pixels pretos no tabuleiro) usando a hyperprior e as fatias anteriores.
     2. Prediz as não-âncoras (pixels brancos) usando a hyperprior, fatias anteriores e as âncoras decodificadas.
+    Utiliza GaussianMixtureConditional para modelar a distribuição latente com maior flexibilidade.
     """
-    def __init__(self, in_channels=192, num_slices=8, latent_dim=192):
+    def __init__(self, in_channels=192, num_slices=8, latent_dim=192, K=3):
         super().__init__()
         self.in_channels = in_channels
         self.num_slices = num_slices
         self.latent_dim = latent_dim
+        self.K = K
         
         # Tamanho de cada fatia de canal
         assert in_channels % num_slices == 0, f"Canais {in_channels} deve ser divisível por num_slices {num_slices}"
         self.slice_size = in_channels // num_slices
 
-        # Condicionador Gaussiano do CompressAI para modelar a distribuição latente
-        self.gaussian_conditional = GaussianConditional(None)
+        # Condicionador Gaussiano de Mistura do CompressAI
+        self.gaussian_conditional = GaussianMixtureConditional(K=K)
 
         # Módulos de fusão de contexto para cada fatia
         self.channel_context_networks = nn.ModuleList()
@@ -113,7 +130,7 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             )
 
             # Rede de parâmetros de entropia que combina Hyperprior + Channel + Spatial
-            # e gera média (mu) e escala (sigma) para o GaussianConditional
+            # e gera média (mu), escala (sigma) e pesos (weights) para o GMM
             input_dim = latent_dim  # Tamanho da hyperprior vinda do hyper-decoder
             if prev_channels > 0:
                 input_dim += self.slice_size * 2  # Adiciona canal-contexto
@@ -121,9 +138,9 @@ class ChannelCheckerboardEntropyModel(nn.Module):
 
             self.entropy_parameter_networks.append(
                 nn.Sequential(
-                    nn.Conv2d(input_dim, self.slice_size * 4, kernel_size=1),
+                    nn.Conv2d(input_dim, self.slice_size * self.K * 4, kernel_size=1),
                     nn.LeakyReLU(inplace=True),
-                    nn.Conv2d(self.slice_size * 4, self.slice_size * 2, kernel_size=1)
+                    nn.Conv2d(self.slice_size * self.K * 4, self.slice_size * self.K * 3, kernel_size=1)
                 )
             )
 
@@ -133,26 +150,22 @@ class ChannelCheckerboardEntropyModel(nn.Module):
         """
         B, C, H, W = x.size()
         device = x.device
-        # Cria uma grade de coordenadas
         coords_h = torch.arange(H, device=device).view(1, 1, H, 1).expand(B, 1, H, W)
         coords_w = torch.arange(W, device=device).view(1, 1, 1, W).expand(B, 1, H, coords_h.size(3))
         mask = ((coords_h + coords_w) % 2 == 0).float()
-        # Expande para a quantidade de canais
-        return mask.expand(B, C, H, W)
+        return mask
 
     def forward(self, y, hyper_features):
         """
-        Durante o treinamento, calculamos a probabilidade de forma paralelizada usando máscaras.
+        Durante o treinamento, calculamos a probabilidade usando o modelo GMM.
         """
         B, C, H, W = y.size()
         device = y.device
         
-        # Lista para armazenar as fatias decodificadas/quantizadas e suas probabilidades
         y_slices = torch.chunk(y, self.num_slices, dim=1)
         y_hat_slices = []
         likelihoods_list = []
 
-        # Gerar máscara do xadrez
         checkerboard_mask = self._get_checkerboard_mask(y_slices[0])
 
         for k in range(self.num_slices):
@@ -166,52 +179,67 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             else:
                 channel_ctx = None
 
-            # 2. Primeira Fase (Âncoras): Predizer a distribuição dos pixels pretos usando apenas hyperprior + canal
-            # Para manter o fluxo estruturado, criamos uma representação temporária onde as não-âncoras são mascaradas
-            # E usamos a rede de parâmetros sem o contexto espacial (ou com contexto espacial zerado para as âncoras)
-            
-            # Para predição de âncoras: contexto espacial é zero
+            # 2. Primeira Fase (Âncoras)
             spatial_ctx_anchors = torch.zeros(B, self.slice_size * 2, H, W, device=device)
-            
-            # Combina os inputs das âncoras
             inputs_anchor = [hyper_features]
             if channel_ctx is not None:
                 inputs_anchor.append(channel_ctx)
             inputs_anchor.append(spatial_ctx_anchors)
             
             params_anchor = self.entropy_parameter_networks[k](torch.cat(inputs_anchor, dim=1))
-            mu_anchor, scale_anchor = params_anchor.chunk(2, dim=1)
-
-            # Quantiza e reconstrói âncoras
-            # Durante o treinamento, a quantização usa ruído uniforme ou round dependendo do CompressAI
-            y_hat_anchor = self.gaussian_conditional.quantize(curr_slice, "noise" if self.training else "dequantize", means=mu_anchor)
+            mu_anchor, scale_anchor, weight_anchor_logits = params_anchor.chunk(3, dim=1)
             
-            # Cria a representação com apenas as âncoras preenchidas e não-âncoras zeradas para o contexto espacial
+            # Ativação softplus para estabilidade das escalas do GMM
+            scale_anchor = torch.nn.functional.softplus(scale_anchor)
+            
+            # Softmax nos pesos da mistura GMM
+            B_a, CK_a, H_a, W_a = weight_anchor_logits.shape
+            weight_anchor = weight_anchor_logits.reshape(B_a, self.K, self.slice_size, H_a, W_a)
+            weight_anchor = torch.softmax(weight_anchor, dim=1)
+            weight_anchor = weight_anchor.reshape(B_a, CK_a, H_a, W_a)
+
+            # Quantiza âncoras (means=None durante treino)
+            y_hat_anchor = self.gaussian_conditional.quantize(
+                curr_slice, 
+                "noise" if self.training else "dequantize", 
+                means=None
+            )
             y_anchor_only = y_hat_anchor * checkerboard_mask
             
-            # 3. Segunda Fase (Não-Âncoras): Computar contexto espacial das âncoras decodificadas
+            # 3. Segunda Fase (Não-Âncoras)
             spatial_ctx_non_anchors = self.spatial_context_networks[k](y_anchor_only)
-            
-            # Combina os inputs das não-âncoras (agora incluindo o contexto espacial real das âncoras vizinhas)
             inputs_non_anchor = [hyper_features]
             if channel_ctx is not None:
                 inputs_non_anchor.append(channel_ctx)
             inputs_non_anchor.append(spatial_ctx_non_anchors)
             
             params_non_anchor = self.entropy_parameter_networks[k](torch.cat(inputs_non_anchor, dim=1))
-            mu_non_anchor, scale_non_anchor = params_non_anchor.chunk(2, dim=1)
+            mu_non_anchor, scale_non_anchor, weight_non_anchor_logits = params_non_anchor.chunk(3, dim=1)
+            
+            scale_non_anchor = torch.nn.functional.softplus(scale_non_anchor)
+            
+            # Softmax nos pesos da mistura GMM
+            B_na, CK_na, H_na, W_na = weight_non_anchor_logits.shape
+            weight_non_anchor = weight_non_anchor_logits.reshape(B_na, self.K, self.slice_size, H_na, W_na)
+            weight_non_anchor = torch.softmax(weight_non_anchor, dim=1)
+            weight_non_anchor = weight_non_anchor.reshape(B_na, CK_na, H_na, W_na)
 
-            # Combina as médias e escalas mesclando âncoras e não-âncoras
+            # Mescla parâmetros
             mu = mu_anchor * checkerboard_mask + mu_non_anchor * (1.0 - checkerboard_mask)
             scale = scale_anchor * checkerboard_mask + scale_non_anchor * (1.0 - checkerboard_mask)
+            weight = weight_anchor * checkerboard_mask + weight_non_anchor * (1.0 - checkerboard_mask)
 
-            # Quantização final da fatia inteira
-            y_hat_slice, slice_likelihoods = self.gaussian_conditional(curr_slice, scale, means=mu)
+            # O GMM calcula a verossimilhança com mu, scale e weight
+            y_hat_slice, slice_likelihoods = self.gaussian_conditional(
+                curr_slice, 
+                scale, 
+                means=mu, 
+                weights=weight
+            )
             
             y_hat_slices.append(y_hat_slice)
             likelihoods_list.append(slice_likelihoods)
 
-        # Concatenar fatias reconstruídas e probabilidades
         y_hat = torch.cat(y_hat_slices, dim=1)
         likelihoods = torch.cat(likelihoods_list, dim=1)
 
@@ -219,8 +247,7 @@ class ChannelCheckerboardEntropyModel(nn.Module):
 
     def compress(self, y, hyper_features):
         """
-        Compacta o latente 'y' sequencialmente em fatias e em formato de xadrez,
-        retornando uma lista contendo os bitstreams de strings codificados aritmeticamente.
+        Compacta o latente 'y' usando GMM e codificação de entropia checkerboard.
         """
         B, C, H, W = y.size()
         device = y.device
@@ -233,7 +260,6 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             curr_slice = y_slices[k]
             prev_slices = y_hat_slices
             
-            # 1. Obter contexto de canal
             if k > 0:
                 prev_latents = torch.cat(prev_slices, dim=1)
                 channel_ctx = self.channel_context_networks[k](prev_latents)
@@ -248,19 +274,51 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             inputs_anchor.append(spatial_ctx_anchors)
             
             params_anchor = self.entropy_parameter_networks[k](torch.cat(inputs_anchor, dim=1))
-            mu_anchor, scale_anchor = params_anchor.chunk(2, dim=1)
+            mu_anchor, scale_anchor, weight_anchor_logits = params_anchor.chunk(3, dim=1)
+            
+            scale_anchor = torch.nn.functional.softplus(scale_anchor)
+            
+            B_a, CK_a, H_a, W_a = weight_anchor_logits.shape
+            weight_anchor = weight_anchor_logits.reshape(B_a, self.K, self.slice_size, H_a, W_a)
+            weight_anchor = torch.softmax(weight_anchor, dim=1)
+            weight_anchor = weight_anchor.reshape(B_a, CK_a, H_a, W_a)
 
-            # Divide em xadrez
             y_k_anchors, y_k_non_anchors = split_checkerboard(curr_slice)
             mu_anchor_split, _ = split_checkerboard(mu_anchor)
             scale_anchor_split, _ = split_checkerboard(scale_anchor)
+            weight_anchor_split, _ = split_checkerboard(weight_anchor)
 
-            # Comprime as âncoras
-            anchor_strings = self.gaussian_conditional.compress(y_k_anchors, scale_anchor_split, means=mu_anchor_split)
-            strings_list.append(anchor_strings)
+            # Pre-calcular abs_max
+            abs_max = (
+                max(torch.abs(y_k_anchors.max()).int().item(), torch.abs(y_k_anchors.min()).int().item()) + 1
+            )
+            abs_max = 1 if abs_max < 1 else abs_max
 
-            # Decomprime as âncoras localmente para contexto da segunda fase
-            y_k_anchors_hat = self.gaussian_conditional.decompress(anchor_strings, scale_anchor_split, means=mu_anchor_split)
+            # Verificar se as âncoras são todas zero
+            y_k_anchors_quant = torch.round(y_k_anchors)
+            zero_bitmap = torch.where(
+                torch.sum(torch.abs(y_k_anchors_quant), (0, 2, 3)) == 0, 0, 1
+            )
+
+            if zero_bitmap.sum() == 0:
+                rv = b""
+                packed_anchor = pack_gmm_string(rv, abs_max, zero_bitmap)
+                strings_list.append([packed_anchor])
+                y_k_anchors_hat = torch.zeros_like(y_k_anchors)
+            else:
+                # Comprime as âncoras usando GMM
+                anchor_res, _ = self.gaussian_conditional.compress(
+                    y_k_anchors, scale_anchor_split, mu_anchor_split, weight_anchor_split
+                )
+                rv, abs_max, zero_bitmap = anchor_res
+                packed_anchor = pack_gmm_string(rv, abs_max, zero_bitmap)
+                strings_list.append([packed_anchor])
+
+                # Decomprime as âncoras localmente para o contexto espacial
+                y_k_anchors_hat = self.gaussian_conditional.decompress(
+                    rv, abs_max, zero_bitmap, scale_anchor_split, mu_anchor_split, weight_anchor_split
+                )
+
             zeros_non_anchors = torch.zeros_like(y_k_non_anchors)
             y_k_anchor_only = merge_checkerboard(y_k_anchors_hat, zeros_non_anchors, H, W)
 
@@ -272,19 +330,50 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             inputs_non_anchor.append(spatial_ctx_non_anchors)
             
             params_non_anchor = self.entropy_parameter_networks[k](torch.cat(inputs_non_anchor, dim=1))
-            mu_non_anchor, scale_non_anchor = params_non_anchor.chunk(2, dim=1)
+            mu_non_anchor, scale_non_anchor, weight_non_anchor_logits = params_non_anchor.chunk(3, dim=1)
+            
+            scale_non_anchor = torch.nn.functional.softplus(scale_non_anchor)
+            
+            B_na, CK_na, H_na, W_na = weight_non_anchor_logits.shape
+            weight_non_anchor = weight_non_anchor_logits.reshape(B_na, self.K, self.slice_size, H_na, W_na)
+            weight_non_anchor = torch.softmax(weight_non_anchor, dim=1)
+            weight_non_anchor = weight_non_anchor.reshape(B_na, CK_na, H_na, W_na)
 
             _, mu_non_anchor_split = split_checkerboard(mu_non_anchor)
             _, scale_non_anchor_split = split_checkerboard(scale_non_anchor)
+            _, weight_non_anchor_split = split_checkerboard(weight_non_anchor)
 
-            # Comprime as não-âncoras
-            non_anchor_strings = self.gaussian_conditional.compress(y_k_non_anchors, scale_non_anchor_split, means=mu_non_anchor_split)
-            strings_list.append(non_anchor_strings)
+            # Pre-calcular abs_max_na
+            abs_max_na = (
+                max(torch.abs(y_k_non_anchors.max()).int().item(), torch.abs(y_k_non_anchors.min()).int().item()) + 1
+            )
+            abs_max_na = 1 if abs_max_na < 1 else abs_max_na
 
-            # Decomprime não-âncoras localmente
-            y_k_non_anchors_hat = self.gaussian_conditional.decompress(non_anchor_strings, scale_non_anchor_split, means=mu_non_anchor_split)
+            # Verificar se não-âncoras são todas zero
+            y_k_non_anchors_quant = torch.round(y_k_non_anchors)
+            zero_bitmap_na = torch.where(
+                torch.sum(torch.abs(y_k_non_anchors_quant), (0, 2, 3)) == 0, 0, 1
+            )
 
-            # Reconstrói a fatia inteira e acumula
+            if zero_bitmap_na.sum() == 0:
+                rv_na = b""
+                packed_non_anchor = pack_gmm_string(rv_na, abs_max_na, zero_bitmap_na)
+                strings_list.append([packed_non_anchor])
+                y_k_non_anchors_hat = torch.zeros_like(y_k_non_anchors)
+            else:
+                # Comprime não-âncoras usando GMM
+                non_anchor_res, _ = self.gaussian_conditional.compress(
+                    y_k_non_anchors, scale_non_anchor_split, mu_non_anchor_split, weight_non_anchor_split
+                )
+                rv_na, abs_max_na, zero_bitmap_na = non_anchor_res
+                packed_non_anchor = pack_gmm_string(rv_na, abs_max_na, zero_bitmap_na)
+                strings_list.append([packed_non_anchor])
+
+                # Decomprime não-âncoras localmente
+                y_k_non_anchors_hat = self.gaussian_conditional.decompress(
+                    rv_na, abs_max_na, zero_bitmap_na, scale_non_anchor_split, mu_non_anchor_split, weight_non_anchor_split
+                )
+
             y_hat_slice = merge_checkerboard(y_k_anchors_hat, y_k_non_anchors_hat, H, W)
             y_hat_slices.append(y_hat_slice)
 
@@ -292,8 +381,7 @@ class ChannelCheckerboardEntropyModel(nn.Module):
 
     def decompress(self, strings_list, hyper_features, H, W):
         """
-        Decomprime o latente 'y' sequencialmente em fatias e em formato de xadrez,
-        usando as tabelas de entropia construídas.
+        Decomprime o latente 'y' usando o modelo GMM.
         """
         B = hyper_features.size(0)
         device = hyper_features.device
@@ -304,7 +392,6 @@ class ChannelCheckerboardEntropyModel(nn.Module):
         for k in range(self.num_slices):
             prev_slices = y_hat_slices
             
-            # 1. Obter contexto de canal
             if k > 0:
                 prev_latents = torch.cat(prev_slices, dim=1)
                 channel_ctx = self.channel_context_networks[k](prev_latents)
@@ -319,15 +406,30 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             inputs_anchor.append(spatial_ctx_anchors)
             
             params_anchor = self.entropy_parameter_networks[k](torch.cat(inputs_anchor, dim=1))
-            mu_anchor, scale_anchor = params_anchor.chunk(2, dim=1)
+            mu_anchor, scale_anchor, weight_anchor_logits = params_anchor.chunk(3, dim=1)
+            
+            scale_anchor = torch.nn.functional.softplus(scale_anchor)
+            
+            B_a, CK_a, H_a, W_a = weight_anchor_logits.shape
+            weight_anchor = weight_anchor_logits.reshape(B_a, self.K, self.slice_size, H_a, W_a)
+            weight_anchor = torch.softmax(weight_anchor, dim=1)
+            weight_anchor = weight_anchor.reshape(B_a, CK_a, H_a, W_a)
 
             mu_anchor_split, _ = split_checkerboard(mu_anchor)
             scale_anchor_split, _ = split_checkerboard(scale_anchor)
+            weight_anchor_split, _ = split_checkerboard(weight_anchor)
 
-            # Decomprime âncoras
-            anchor_strings = strings_list[string_idx]
+            # Decomprime as âncoras do GMM
+            packed_anchor = strings_list[string_idx][0]
             string_idx += 1
-            y_k_anchors_hat = self.gaussian_conditional.decompress(anchor_strings, scale_anchor_split, means=mu_anchor_split)
+            rv, abs_max, zero_bitmap = unpack_gmm_string(packed_anchor, device)
+            
+            if zero_bitmap.sum() == 0:
+                y_k_anchors_hat = torch.zeros(B, self.slice_size, H, W // 2, device=device)
+            else:
+                y_k_anchors_hat = self.gaussian_conditional.decompress(
+                    rv, abs_max, zero_bitmap, scale_anchor_split, mu_anchor_split, weight_anchor_split
+                )
             
             zeros_non_anchors = torch.zeros(B, self.slice_size, H, W // 2, device=device)
             y_k_anchor_only = merge_checkerboard(y_k_anchors_hat, zeros_non_anchors, H, W)
@@ -340,15 +442,30 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             inputs_non_anchor.append(spatial_ctx_non_anchors)
             
             params_non_anchor = self.entropy_parameter_networks[k](torch.cat(inputs_non_anchor, dim=1))
-            mu_non_anchor, scale_non_anchor = params_non_anchor.chunk(2, dim=1)
+            mu_non_anchor, scale_non_anchor, weight_non_anchor_logits = params_non_anchor.chunk(3, dim=1)
+            
+            scale_non_anchor = torch.nn.functional.softplus(scale_non_anchor)
+            
+            B_na, CK_na, H_na, W_na = weight_non_anchor_logits.shape
+            weight_non_anchor = weight_non_anchor_logits.reshape(B_na, self.K, self.slice_size, H_na, W_na)
+            weight_non_anchor = torch.softmax(weight_non_anchor, dim=1)
+            weight_non_anchor = weight_non_anchor.reshape(B_na, CK_na, H_na, W_na)
 
             _, mu_non_anchor_split = split_checkerboard(mu_non_anchor)
             _, scale_non_anchor_split = split_checkerboard(scale_non_anchor)
+            _, weight_non_anchor_split = split_checkerboard(weight_non_anchor)
 
-            # Decomprime não-âncoras
-            non_anchor_strings = strings_list[string_idx]
+            # Decomprime as não-âncoras do GMM
+            packed_non_anchor = strings_list[string_idx][0]
             string_idx += 1
-            y_k_non_anchors_hat = self.gaussian_conditional.decompress(non_anchor_strings, scale_non_anchor_split, means=mu_non_anchor_split)
+            rv_na, abs_max_na, zero_bitmap_na = unpack_gmm_string(packed_non_anchor, device)
+            
+            if zero_bitmap_na.sum() == 0:
+                y_k_non_anchors_hat = torch.zeros(B, self.slice_size, H, W // 2, device=device)
+            else:
+                y_k_non_anchors_hat = self.gaussian_conditional.decompress(
+                    rv_na, abs_max_na, zero_bitmap_na, scale_non_anchor_split, mu_non_anchor_split, weight_non_anchor_split
+                )
 
             # Mescla e acumula
             y_hat_slice = merge_checkerboard(y_k_anchors_hat, y_k_non_anchors_hat, H, W)
