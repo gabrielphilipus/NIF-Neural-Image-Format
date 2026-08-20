@@ -198,12 +198,16 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             weight_anchor = torch.softmax(weight_anchor, dim=1)
             weight_anchor = weight_anchor.reshape(B_a, CK_a, H_a, W_a)
 
-            # Quantiza âncoras (means=None durante treino)
+            # Calcula a média ponderada do GMM (esperança matemática) para centralização
+            mu_anchor_gmm = (mu_anchor.reshape(B, self.K, self.slice_size, H, W) * 
+                             weight_anchor.reshape(B, self.K, self.slice_size, H, W)).sum(dim=1)
+
+            # Quantiza âncoras centrando pela média GMM para consistência espacial
             y_hat_anchor = self.gaussian_conditional.quantize(
-                curr_slice, 
+                curr_slice - mu_anchor_gmm, 
                 "noise" if self.training else "dequantize", 
                 means=None
-            )
+            ) + mu_anchor_gmm
             y_anchor_only = y_hat_anchor * checkerboard_mask
             
             # 3. Segunda Fase (Não-Âncoras)

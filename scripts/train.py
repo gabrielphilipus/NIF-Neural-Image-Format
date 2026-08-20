@@ -187,6 +187,7 @@ def main():
     parser.add_argument("--lambda_max", type=float, default=1000.0, help="Lambda máximo da curva RD")
     parser.add_argument("--no_lpips", action="store_true", help="Desativar perda perceptual LPIPS")
     parser.add_argument("--save_path", type=str, default="checkpoints", help="Pasta para salvar checkpoints")
+    parser.add_argument("--gan_warmup_frac", type=float, default=0.3, help="Fração de épocas de warmup sem GAN")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -233,6 +234,7 @@ def main():
 
     milestones = [int(args.epochs * 0.6), int(args.epochs * 0.88)]
     lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+    lr_scheduler_d = optim.lr_scheduler.MultiStepLR(optimizer_d, milestones=milestones, gamma=0.1)
     print(f"Milestones do Scheduler (Decaimento LR): {milestones}")
 
     criterion = NIFLoss(use_lpips=not args.no_lpips, device=device)
@@ -248,6 +250,12 @@ def main():
         epoch_lpips = 0
         epoch_loss_d = 0
         epoch_loss_g_adv = 0
+
+        # Fator de warmup para ligar a GAN progressivamente apósargs.gan_warmup_frac das épocas
+        if args.gan_warmup_frac > 0:
+            gan_ramp = min(1.0, max(0.0, (epoch - args.epochs * args.gan_warmup_frac) / (args.epochs * 0.1)))
+        else:
+            gan_ramp = 1.0
 
         for i, (x, _) in enumerate(dataloader):
             x = x.to(device)
@@ -273,10 +281,13 @@ def main():
             pred_real = discriminator(x)
             pred_fake = discriminator(x_hat_det)
             
-            # Perda adversarial do discriminador (LSGAN)
-            loss_d_real = nn.functional.mse_loss(pred_real, torch.ones_like(pred_real))
-            loss_d_fake = nn.functional.mse_loss(pred_fake, torch.zeros_like(pred_fake))
-            loss_d = 0.5 * (loss_d_real + loss_d_fake)
+            # Redimensiona a SFM para o tamanho do PatchGAN do discriminador (evita alucinação em texto/bordas)
+            sfm_d = nn.functional.interpolate(sfm, size=pred_fake.shape[-2:], mode='bilinear', align_corners=False)
+            
+            # Perda adversarial do discriminador (LSGAN) com máscara SFM
+            loss_d_real_map = nn.functional.mse_loss(pred_real, torch.ones_like(pred_real), reduction='none')
+            loss_d_fake_map = nn.functional.mse_loss(pred_fake, torch.zeros_like(pred_fake), reduction='none')
+            loss_d = 0.5 * ((loss_d_real_map * (1.0 - sfm_d)).mean() + (loss_d_fake_map * (1.0 - sfm_d)).mean())
             
             optimizer_d.zero_grad()
             loss_d.backward()
@@ -291,13 +302,15 @@ def main():
                 lambda_max=args.lambda_max
             )
 
-            # Perda adversarial do gerador (LSGAN)
+            # Perda adversarial do gerador (LSGAN) com máscara SFM
             pred_fake_g = discriminator(x_hat)
-            loss_g_adv = nn.functional.mse_loss(pred_fake_g, torch.ones_like(pred_fake_g))
+            adv_target = torch.ones_like(pred_fake_g)
+            loss_g_adv_map = nn.functional.mse_loss(pred_fake_g, adv_target, reduction='none')
+            loss_g_adv = (loss_g_adv_map * (1.0 - sfm_d)).mean()
             
-            # Peso da perda GAN é ativado progressivamente nas qualidades baixas (q -> 0.1)
+            # Peso da perda GAN é ativado progressivamente nas qualidades baixas (q -> 0.1) e após warmup
             q_mean = q.mean().item()
-            adv_w = 0.05 * (1.0 - q_mean)
+            adv_w = 0.05 * (1.0 - q_mean) * gan_ramp
             
             total_g_loss = loss + adv_w * loss_g_adv
 
@@ -350,16 +363,17 @@ def main():
             if i % 10 == 0:
                 print(f"Época [{epoch+1}/{args.epochs}] | Batch [{i}/{len(dataloader)}] | "
                       f"Loss: {loss.item():.4f} | Bpp: {rate.item():.4f} | MSE: {mse.item():.6f} | "
-                      f"MS-SSIM: {(1.0 - msssim.item()):.4f} | Loss_D: {loss_d.item():.4f}")
+                      f"MS-SSIM: {(1.0 - msssim.item()):.4f} | LPIPS: {weighted_lpips.item():.4f} | Loss_D: {loss_d.item():.4f}")
 
         lr_scheduler.step()
+        lr_scheduler_d.step()
 
         # Resumo da época
         num_batches = len(dataloader)
         print(f"==== Fim da Época {epoch+1} ====")
         print(f"Média - Loss: {epoch_loss/num_batches:.4f} | Bpp: {epoch_bpp/num_batches:.4f} | "
               f"MSE: {epoch_mse/num_batches:.6f} | MS-SSIM: {epoch_msssim/num_batches:.4f} | "
-              f"Loss_D: {epoch_loss_d/num_batches:.4f}")
+              f"LPIPS: {epoch_lpips/num_batches:.4f} | Loss_D: {epoch_loss_d/num_batches:.4f}")
 
         # Log de métricas médias por época no TensorBoard
         writer.add_scalar("Epoch/Loss", epoch_loss / num_batches, epoch + 1)

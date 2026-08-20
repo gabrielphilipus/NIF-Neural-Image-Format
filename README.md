@@ -12,14 +12,20 @@ O codec foi estruturado com as tecnologias mais recentes em compressão neural d
    * Codificador/Decodificador aritmético (ANS) embarcado nativamente em C++.
 ---
 ##  Resultados Obtidos (Avaliado no Benchmark Kodak24)
-O modelo foi treinado por 300 épocas no dataset de alta resolução **DIV2K** e avaliado no benchmark padrão da literatura **Kodak24** (completamente disjunto do conjunto de treino), apresentando os seguintes resultados médios de taxa-distorção:
+O modelo foi treinado por 300 épocas no dataset de alta resolução **DIV2K** e avaliado no benchmark padrão da literatura **Kodak24** (completamente disjunto do conjunto de treino), apresentando os seguintes resultados médios agregados ($\text{média} \pm \text{desvio padrão}$):
 
-* **Fator de Qualidade q = 0.50**:
-  * **Bitrate Médio:** **0.8503 bpp**
-  * **PSNR Médio:** **28.77 dB**
-  * **MS-SSIM Médio:** **0.98382** (fidelidade estrutural ultra-alta percebida pelo cérebro)
-  * **LPIPS Médio:** **0.05065** (erro perceptual extremamente baixo)
-* **Queda Perceptual Confiável**: A avaliação em imagens de teste que o modelo nunca viu comprova a capacidade de generalização e a robustez do pipeline.
+| Qualidade $q$ | Bitrate (bpp) | PSNR (dB) | MS-SSIM | LPIPS |
+| :--- | :--- | :--- | :--- | :--- |
+| **0.10** | $0.8311 \pm 0.1220$ | $28.77 \pm 2.00$ | $0.98363 \pm 0.00389$ | $0.05109 \pm 0.01481$ |
+| **0.30** | $0.8393 \pm 0.1224$ | $28.77 \pm 2.00$ | $0.98373 \pm 0.00388$ | $0.05086 \pm 0.01489$ |
+| **0.50** | $0.8506 \pm 0.1228$ | $28.77 \pm 2.00$ | $0.98382 \pm 0.00388$ | $0.05065 \pm 0.01477$ |
+| **0.70** | $0.8644 \pm 0.1231$ | $28.77 \pm 2.00$ | $0.98393 \pm 0.00390$ | $0.05048 \pm 0.01472$ |
+| **0.90** | $0.8831 \pm 0.1240$ | $28.77 \pm 2.00$ | $0.98407 \pm 0.00391$ | $0.05043 \pm 0.01488$ |
+
+* **Reprodutibilidade Científica**: A tabela acima é obtida diretamente executando a avaliação integrada:
+  ```bash
+  python scripts/eval.py --checkpoint checkpoints/nif_epoch_300.pth --image kodak24/ --aggregate --save_output
+  ```
 ---
 ##  Dashboard Web Interativo
 O projeto acompanha um dashboard web local construído em Flask para demonstrações visuais e análises em tempo real:

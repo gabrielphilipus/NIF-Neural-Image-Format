@@ -84,6 +84,7 @@ def main():
     parser.add_argument("--save_output", action="store_true", help="Salvar as imagens reconstruídas em disco")
     parser.add_argument("--output_dir", type=str, default="results", help="Diretório para salvar as saídas")
     parser.add_argument("--no_lpips", action="store_true", help="Desativar cálculo da métrica LPIPS")
+    parser.add_argument("--aggregate", action="store_true", help="Calcular e exibir média ± desvio padrão do dataset ao final")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -134,6 +135,8 @@ def main():
     print(f"{'Imagem':<20} | {'Qualidade q':<11} | {'Bpp (v)':<10} | {'PSNR (^)':<10} | {'MS-SSIM (^)':<12} | {'LPIPS (v)':<10}")
     print("="*80)
 
+    results_data = {}  # q -> list of dict
+
     for img_path in images_to_eval:
         img_name = os.path.basename(img_path)
         for q in qs:
@@ -145,6 +148,16 @@ def main():
                 # Imprime linha de resultado
                 print(f"{img_name[:20]:<20} | {q:<11.2f} | {bpp:<10.4f} | {psnr:<10.2f} | {msssim:<12.5f} | {lp_val:<10.5f}")
                 
+                if q not in results_data:
+                    results_data[q] = []
+                results_data[q].append({
+                    'image': img_name,
+                    'bpp': bpp,
+                    'psnr': psnr,
+                    'msssim': msssim,
+                    'lpips': lp_val
+                })
+                
                 if args.save_output:
                     # Salva imagem reconstruída
                     base_name, ext = os.path.splitext(img_name)
@@ -154,6 +167,50 @@ def main():
                 print(f"Erro ao avaliar {img_name} no q={q}: {e}")
                 
     print("="*80 + "\n")
+
+    if args.aggregate and len(results_data) > 0:
+        print("="*80)
+        print(" RESUMO AGREGADO DO DATASET (Média ± Desvio Padrão)")
+        print("="*80)
+        print(f"{'Qualidade q':<11} | {'Bpp (v)':<15} | {'PSNR (^)':<15} | {'MS-SSIM (^)':<15} | {'LPIPS (v)':<15}")
+        print("="*80)
+        
+        aggregated_rows = []
+        for q in sorted(results_data.keys()):
+            q_res = results_data[q]
+            bpps = [r['bpp'] for r in q_res]
+            psnrs = [r['psnr'] for r in q_res]
+            msssims = [r['msssim'] for r in q_res]
+            lpipss = [r['lpips'] for r in q_res]
+            
+            mean_bpp, std_bpp = np.mean(bpps), np.std(bpps)
+            mean_psnr, std_psnr = np.mean(psnrs), np.std(psnrs)
+            mean_ssim, std_ssim = np.mean(msssims), np.std(msssims)
+            mean_lp, std_lp = np.mean(lpipss), np.std(lpipss)
+            
+            print(f"{q:<11.2f} | {mean_bpp:.4f} ± {std_bpp:.4f} | {mean_psnr:.2f} ± {std_psnr:.2f} | {mean_ssim:.5f} ± {std_ssim:.5f} | {mean_lp:.5f} ± {std_lp:.5f}")
+            
+            aggregated_rows.append({
+                'q': q,
+                'bpp_mean': float(mean_bpp), 'bpp_std': float(std_bpp),
+                'psnr_mean': float(mean_psnr), 'psnr_std': float(std_psnr),
+                'msssim_mean': float(mean_ssim), 'msssim_std': float(std_ssim),
+                'lpips_mean': float(mean_lp), 'lpips_std': float(std_lp)
+            })
+            
+        print("="*80 + "\n")
+        
+        # Opcionalmente, salvar os resultados em JSON
+        if args.save_output:
+            import json
+            json_path = os.path.join(args.output_dir, "eval_aggregation.json")
+            save_data = {
+                'raw_results': results_data,
+                'aggregated_results': aggregated_rows
+            }
+            with open(json_path, 'w', encoding='utf-8') as jf:
+                json.dump(save_data, jf, indent=4, ensure_ascii=False)
+            print(f"Resultados agregados e brutos salvos em: {json_path}")
 
 if __name__ == "__main__":
     main()
