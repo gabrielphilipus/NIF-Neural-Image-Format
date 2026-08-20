@@ -85,6 +85,9 @@ def main():
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda":
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
     print(f"Executando avaliação em: {device}")
 
     # Carrega o modelo

@@ -110,7 +110,8 @@ def compress_image(model, image_path, output_path, q_val, device):
 
     # Prepara input
     x = transforms.ToTensor()(img).unsqueeze(0).to(device)
-    quality = torch.tensor([[q_val]], device=device)
+    q_val_quant = int(q_val * 255) / 255.0
+    quality = torch.tensor([[q_val_quant]], device=device)
     
     # Roda o compressor
     out = model.compress(x, quality)
@@ -184,6 +185,9 @@ def main():
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda":
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
     
     # Inicializa modelo e carrega pesos
     model = NIFCodec(num_filters=128, latent_dim=192, num_slices=8).to(device)

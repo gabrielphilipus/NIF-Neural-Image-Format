@@ -317,7 +317,7 @@ class ChannelCheckerboardEntropyModel(nn.Module):
                 # Decomprime as âncoras localmente para o contexto espacial
                 y_k_anchors_hat = self.gaussian_conditional.decompress(
                     rv, abs_max, zero_bitmap, scale_anchor_split, mu_anchor_split, weight_anchor_split
-                )
+                ).to(device)
 
             zeros_non_anchors = torch.zeros_like(y_k_non_anchors)
             y_k_anchor_only = merge_checkerboard(y_k_anchors_hat, zeros_non_anchors, H, W)
@@ -372,7 +372,7 @@ class ChannelCheckerboardEntropyModel(nn.Module):
                 # Decomprime não-âncoras localmente
                 y_k_non_anchors_hat = self.gaussian_conditional.decompress(
                     rv_na, abs_max_na, zero_bitmap_na, scale_non_anchor_split, mu_non_anchor_split, weight_non_anchor_split
-                )
+                ).to(device)
 
             y_hat_slice = merge_checkerboard(y_k_anchors_hat, y_k_non_anchors_hat, H, W)
             y_hat_slices.append(y_hat_slice)
@@ -429,7 +429,7 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             else:
                 y_k_anchors_hat = self.gaussian_conditional.decompress(
                     rv, abs_max, zero_bitmap, scale_anchor_split, mu_anchor_split, weight_anchor_split
-                )
+                ).to(device)
             
             zeros_non_anchors = torch.zeros(B, self.slice_size, H, W // 2, device=device)
             y_k_anchor_only = merge_checkerboard(y_k_anchors_hat, zeros_non_anchors, H, W)
@@ -465,7 +465,7 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             else:
                 y_k_non_anchors_hat = self.gaussian_conditional.decompress(
                     rv_na, abs_max_na, zero_bitmap_na, scale_non_anchor_split, mu_non_anchor_split, weight_non_anchor_split
-                )
+                ).to(device)
 
             # Mescla e acumula
             y_hat_slice = merge_checkerboard(y_k_anchors_hat, y_k_non_anchors_hat, H, W)
