@@ -32,26 +32,27 @@ Garante a instalação do PyTorch, CompressAI e dependências do dashboard:
 ```bash
 pip install -r requirements.txt
 pip install Flask
-
+```
 2. Treinamento do Modelo
 Para treinar o modelo do zero usando o dataset DIV2K:
 
-bash
+```bash
 python train.py --dataset DIV2K_train_HR --epochs 300
-
+```
 3. Compactação e Descompactação via CLI
 
 Para compactar uma imagem:
-bash
+```bash
 python nif_tool.py compress --checkpoint checkpoints/nif_epoch_300.pth --input NOME_DA_IMAGEM.png --output imagem_comprimida.nif --quality 0.5
-
+```
 Para descompactar o arquivo .nif:
-bash
+```bash
 python nif_tool.py decompress --checkpoint checkpoints/nif_epoch_300.pth --input imagem_comprimida.nif --output reconstruida.png
-
+```
 4. Abrir o Dashboard Interativo
 
 Para iniciar a interface web:
-bash
+```bash
 python dashboard.py
+```
 Em seguida, abra o navegador em: http://localhost:5000
