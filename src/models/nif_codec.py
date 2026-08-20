@@ -40,6 +40,28 @@ class NeuralLoopFilter(nn.Module):
         res = self.out_conv(res)
         return x + res
 
+
+class ChannelAttention(nn.Module):
+    """
+    Squeeze-and-Excitation (SE) Block para recalibração de canais no Encoder e Decoder.
+    """
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        reduced_channels = max(channels // reduction, 8)
+        self.fc = nn.Sequential(
+            nn.Conv2d(channels, reduced_channels, kernel_size=1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(reduced_channels, channels, kernel_size=1, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        y = self.avg_pool(x)
+        y = self.fc(y)
+        return x * y
+
+
 class QualityConditioningNetwork(nn.Module):
     """
     Rede MLP que converte o parâmetro de qualidade 'q' (0.1 a 1.0)
@@ -102,17 +124,21 @@ class NIFCodec(CompressionModel):
         self.enc_conv1 = nn.Conv2d(3, num_filters, kernel_size=5, stride=2, padding=2)
         self.enc_gdn1 = GDN(num_filters)
         self.enc_film1 = FiLMBlock()
+        self.enc_ca1 = ChannelAttention(num_filters)
 
         self.enc_conv2 = nn.Conv2d(num_filters, num_filters, kernel_size=5, stride=2, padding=2)
         self.enc_gdn2 = GDN(num_filters)
         self.enc_film2 = FiLMBlock()
+        self.enc_ca2 = ChannelAttention(num_filters)
 
         self.enc_conv3 = nn.Conv2d(num_filters, num_filters, kernel_size=5, stride=2, padding=2)
         self.enc_gdn3 = GDN(num_filters)
         self.enc_film3 = FiLMBlock()
+        self.enc_ca3 = ChannelAttention(num_filters)
 
         self.enc_conv4 = nn.Conv2d(num_filters, latent_dim, kernel_size=5, stride=2, padding=2)
         self.enc_film4 = FiLMBlock()
+        self.enc_ca4 = ChannelAttention(latent_dim)
 
         # 3. Hiperprior (Análise do Latente)
         self.hyper_enc_conv1 = nn.Conv2d(latent_dim, num_filters, kernel_size=3, stride=1, padding=1)
@@ -140,17 +166,21 @@ class NIFCodec(CompressionModel):
         self.dec_deconv1 = nn.ConvTranspose2d(latent_dim, num_filters, kernel_size=5, stride=2, padding=2, output_padding=1)
         self.dec_igdn1 = GDN(num_filters, inverse=True)
         self.dec_film1 = FiLMBlock()
+        self.dec_ca1 = ChannelAttention(num_filters)
 
         self.dec_deconv2 = nn.ConvTranspose2d(num_filters, num_filters, kernel_size=5, stride=2, padding=2, output_padding=1)
         self.dec_igdn2 = GDN(num_filters, inverse=True)
         self.dec_film2 = FiLMBlock()
+        self.dec_ca2 = ChannelAttention(num_filters)
 
         self.dec_deconv3 = nn.ConvTranspose2d(num_filters, num_filters, kernel_size=5, stride=2, padding=2, output_padding=1)
         self.dec_igdn3 = GDN(num_filters, inverse=True)
         self.dec_film3 = FiLMBlock()
+        self.dec_ca3 = ChannelAttention(num_filters)
 
         self.dec_deconv4 = nn.ConvTranspose2d(num_filters, 3, kernel_size=5, stride=2, padding=2, output_padding=1)
         self.dec_film4 = FiLMBlock()
+        self.dec_ca4 = ChannelAttention(3)
 
         # 7. Filtro de Loop Neural (Neural Loop Filter)
         self.loop_filter = NeuralLoopFilter(in_channels=3, num_features=32, num_blocks=3)
@@ -190,16 +220,16 @@ class NIFCodec(CompressionModel):
 
         # B. Encoder (Análise) com modulação de qualidade
         scale_e1, bias_e1 = self.cond_enc1(quality)
-        x_e1 = self.enc_film1(self.enc_gdn1(self.enc_conv1(x)), scale_e1, bias_e1)
+        x_e1 = self.enc_ca1(self.enc_film1(self.enc_gdn1(self.enc_conv1(x)), scale_e1, bias_e1))
 
         scale_e2, bias_e2 = self.cond_enc2(quality)
-        x_e2 = self.enc_film2(self.enc_gdn2(self.enc_conv2(x_e1)), scale_e2, bias_e2)
+        x_e2 = self.enc_ca2(self.enc_film2(self.enc_gdn2(self.enc_conv2(x_e1)), scale_e2, bias_e2))
 
         scale_e3, bias_e3 = self.cond_enc3(quality)
-        x_e3 = self.enc_film3(self.enc_gdn3(self.enc_conv3(x_e2)), scale_e3, bias_e3)
+        x_e3 = self.enc_ca3(self.enc_film3(self.enc_gdn3(self.enc_conv3(x_e2)), scale_e3, bias_e3))
 
         scale_e4, bias_e4 = self.cond_enc4(quality)
-        y = self.enc_film4(self.enc_conv4(x_e3), scale_e4, bias_e4)
+        y = self.enc_ca4(self.enc_film4(self.enc_conv4(x_e3), scale_e4, bias_e4))
 
         # C. Hyperprior (Análise do Latente)
         z = self.hyper_enc_conv3(
@@ -231,16 +261,16 @@ class NIFCodec(CompressionModel):
 
         # G. Decoder (Síntese) com modulação de qualidade
         scale_d1, bias_d1 = self.cond_dec1(quality)
-        y_d1 = self.dec_film1(self.dec_igdn1(self.dec_deconv1(y_hat)), scale_d1, bias_d1)
+        y_d1 = self.dec_ca1(self.dec_film1(self.dec_igdn1(self.dec_deconv1(y_hat)), scale_d1, bias_d1))
 
         scale_d2, bias_d2 = self.cond_dec2(quality)
-        y_d2 = self.dec_film2(self.dec_igdn2(self.dec_deconv2(y_d1)), scale_d2, bias_d2)
+        y_d2 = self.dec_ca2(self.dec_film2(self.dec_igdn2(self.dec_deconv2(y_d1)), scale_d2, bias_d2))
 
         scale_d3, bias_d3 = self.cond_dec3(quality)
-        y_d3 = self.dec_film3(self.dec_igdn3(self.dec_deconv3(y_d2)), scale_d3, bias_d3)
+        y_d3 = self.dec_ca3(self.dec_film3(self.dec_igdn3(self.dec_deconv3(y_d2)), scale_d3, bias_d3))
 
         scale_d4, bias_d4 = self.cond_dec4(quality)
-        x_raw = self.dec_film4(self.dec_deconv4(y_d3), scale_d4, bias_d4)
+        x_raw = self.dec_ca4(self.dec_film4(self.dec_deconv4(y_d3), scale_d4, bias_d4))
         x_hat = self.loop_filter(x_raw)
 
         return {
@@ -263,16 +293,16 @@ class NIFCodec(CompressionModel):
         """
         # A. Encoder (Análise)
         scale_e1, bias_e1 = self.cond_enc1(quality)
-        x_e1 = self.enc_film1(self.enc_gdn1(self.enc_conv1(x)), scale_e1, bias_e1)
+        x_e1 = self.enc_ca1(self.enc_film1(self.enc_gdn1(self.enc_conv1(x)), scale_e1, bias_e1))
 
         scale_e2, bias_e2 = self.cond_enc2(quality)
-        x_e2 = self.enc_film2(self.enc_gdn2(self.enc_conv2(x_e1)), scale_e2, bias_e2)
+        x_e2 = self.enc_ca2(self.enc_film2(self.enc_gdn2(self.enc_conv2(x_e1)), scale_e2, bias_e2))
 
         scale_e3, bias_e3 = self.cond_enc3(quality)
-        x_e3 = self.enc_film3(self.enc_gdn3(self.enc_conv3(x_e2)), scale_e3, bias_e3)
+        x_e3 = self.enc_ca3(self.enc_film3(self.enc_gdn3(self.enc_conv3(x_e2)), scale_e3, bias_e3))
 
         scale_e4, bias_e4 = self.cond_enc4(quality)
-        y = self.enc_film4(self.enc_conv4(x_e3), scale_e4, bias_e4)
+        y = self.enc_ca4(self.enc_film4(self.enc_conv4(x_e3), scale_e4, bias_e4))
 
         # B. Hyperprior (Análise do Latente)
         z = self.hyper_enc_conv3(
@@ -335,16 +365,16 @@ class NIFCodec(CompressionModel):
 
         # D. Decoder (Síntese)
         scale_d1, bias_d1 = self.cond_dec1(quality)
-        y_d1 = self.dec_film1(self.dec_igdn1(self.dec_deconv1(y_hat)), scale_d1, bias_d1)
+        y_d1 = self.dec_ca1(self.dec_film1(self.dec_igdn1(self.dec_deconv1(y_hat)), scale_d1, bias_d1))
 
         scale_d2, bias_d2 = self.cond_dec2(quality)
-        y_d2 = self.dec_film2(self.dec_igdn2(self.dec_deconv2(y_d1)), scale_d2, bias_d2)
+        y_d2 = self.dec_ca2(self.dec_film2(self.dec_igdn2(self.dec_deconv2(y_d1)), scale_d2, bias_d2))
 
         scale_d3, bias_d3 = self.cond_dec3(quality)
-        y_d3 = self.dec_film3(self.dec_igdn3(self.dec_deconv3(y_d2)), scale_d3, bias_d3)
+        y_d3 = self.dec_ca3(self.dec_film3(self.dec_igdn3(self.dec_deconv3(y_d2)), scale_d3, bias_d3))
 
         scale_d4, bias_d4 = self.cond_dec4(quality)
-        x_raw = self.dec_film4(self.dec_deconv4(y_d3), scale_d4, bias_d4)
+        x_raw = self.dec_ca4(self.dec_film4(self.dec_deconv4(y_d3), scale_d4, bias_d4))
         x_hat = self.loop_filter(x_raw)
 
         return {
