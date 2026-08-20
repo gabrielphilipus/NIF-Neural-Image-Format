@@ -1,6 +1,5 @@
 # NIF - Neural Image Format 
-O **NIF (Neural Image Format)** é um codec de compressão de imagem baseado em **aprendizado profundo de ponta a ponta (End-to-End Learned Image Compression)**. Ele utiliza redes neurais convolucionais profundas acopladas a mecanismos de atenção, modulação de taxa variável e codificação de entropia avançada para superar as limitações dos formatos tradicionais (como o JPEG).
-Este repositório contém a implementação completa do pipeline de treinamento, compactador binário físico e um dashboard web interativo para visualização comparativa.
+O **NIF (Neural Image Format)** é um codec de compressão de imagem baseado em **aprendizado profundo de ponta a ponta (End-to-End Learned Image Compression)**. Ele utiliza redes neurais convolucionais profundas acopladas a mecanismos de atenção, modulação de taxa variável e codificação de entropia avançada para superar as limitações dos formatos tradicionais.
 ---
 ##  Destaques & Arquitetura
 O codec foi estruturado com as tecnologias mais recentes em compressão neural de imagens:
