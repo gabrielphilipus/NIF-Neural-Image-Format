@@ -11,12 +11,15 @@ O codec foi estruturado com as tecnologias mais recentes em compressão neural d
    * Substituição do modelo Gaussiano simples por **GMM (Gaussian Mixture Model)** com $K=3$ componentes para modelar distribuições hiper-complexas.
    * Codificador/Decodificador aritmético (ANS) embarcado nativamente em C++.
 ---
-##  Resultados Obtidos (300 Epochs no DIV2K)
-O modelo foi treinado por 300 épocas no dataset de alta resolução **DIV2K**, apresentando desempenho excepcional de taxa-distorção:
-* **Taxa de Compressão:** Até **15.15x** de redução física (arquivos binários `.nif` até **93.4% menores** que o original).
-* **Qualidade Visual (PSNR):** **~32.12 dB** (qualidade excelente, sem distorções ou ruídos perceptíveis).
-* **Fidelidade Estrutural (MS-SSIM):** **0.979** (quase idêntico à imagem original para o olho humano).
-* **Eficiência:** Bitrates baixos perto de **0.98 bpp** (bits por pixel).
+##  Resultados Obtidos (Avaliado no Benchmark Kodak24)
+O modelo foi treinado por 300 épocas no dataset de alta resolução **DIV2K** e avaliado no benchmark padrão da literatura **Kodak24** (completamente disjunto do conjunto de treino), apresentando os seguintes resultados médios de taxa-distorção:
+
+* **Fator de Qualidade q = 0.50**:
+  * **Bitrate Médio:** **0.8503 bpp**
+  * **PSNR Médio:** **28.77 dB**
+  * **MS-SSIM Médio:** **0.98382** (fidelidade estrutural ultra-alta percebida pelo cérebro)
+  * **LPIPS Médio:** **0.05065** (erro perceptual extremamente baixo)
+* **Queda Perceptual Confiável**: A avaliação em imagens de teste que o modelo nunca viu comprova a capacidade de generalização e a robustez do pipeline.
 ---
 ##  Dashboard Web Interativo
 O projeto acompanha um dashboard web local construído em Flask para demonstrações visuais e análises em tempo real:
