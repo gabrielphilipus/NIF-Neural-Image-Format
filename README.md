@@ -1,4 +1,9 @@
-# NIF - Neural Image Format 
+# NIF - Neural Image Format 📸🤖
+
+[![Python Package](https://github.com/gabrielphilipus/NIF-Neural-Image-Format/actions/workflows/python-package.yml/badge.svg)](https://github.com/gabrielphilipus/NIF-Neural-Image-Format/actions/workflows/python-package.yml)
+[![Pylint](https://github.com/gabrielphilipus/NIF-Neural-Image-Format/actions/workflows/pylint.yml/badge.svg)](https://github.com/gabrielphilipus/NIF-Neural-Image-Format/actions/workflows/pylint.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 O **NIF (Neural Image Format)** é um codec de compressão de imagem baseado em **aprendizado profundo de ponta a ponta (End-to-End Learned Image Compression)**. Ele utiliza redes neurais convolucionais profundas acopladas a mecanismos de atenção, modulação de taxa variável e codificação de entropia avançada para superar as limitações dos formatos tradicionais.
 ---
 ##  Destaques & Arquitetura
@@ -65,3 +70,31 @@ Para iniciar a interface web:
 python scripts/dashboard.py
 ```
 Em seguida, abra o navegador em: http://localhost:5000
+
+---
+
+## ⚡ Latência & Custo Operacional (AWS g4dn.xlarge)
+
+O script de benchmark mede a velocidade de compressão/descompressão do codec NIF e estima o custo para processar **1 Milhão de imagens** em uma instância de referência na nuvem (AWS EC2 `g4dn.xlarge`, custo de **$0.526 por hora**):
+
+| Dispositivo | Resolução | Encode (ms) | Decode (ms) | Total (ms) | Custo / 1M Imagens (USD) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **CPU** | 256x256 | 375.18 | 255.60 | 630.79 | **$92.16** |
+| **CPU** | 512x512 | 1212.72 | 880.88 | 2093.59 | **$305.90** |
+| **CPU** | 1024x1024 | 6461.80 | 5582.96 | 12044.76 | **$1759.87** |
+| **GPU (CUDA)** | 256x256 | 406.20 | 245.09 | 651.29 | **$95.16** |
+| **GPU (CUDA)** | 512x512 | 1141.65 | 604.92 | 1746.57 | **$255.19** |
+| **GPU (CUDA)** | 1024x1024 | 4427.06 | 2222.63 | 6649.69 | **$971.59** |
+
+Para rodar este benchmark em sua máquina:
+```bash
+python scripts/benchmark_latency.py
+```
+
+---
+
+## ⚠️ Limitações & Próximos Passos
+O formato NIF é um projeto experimental de pesquisa em compressão neural de imagens e possui as seguintes limitações conhecidas:
+1. **Curva RD Fina**: Atualmente, a curva de taxa-distorção apresenta modulação estreita (*Conditioning Collapse*) na variação de qualidade $q$. Para apresentações profissionais, recomenda-se a aplicação de *Positional Encoding* no parâmetro de qualidade $q$ e taxas de aprendizado maiores na MLP de condicionamento na próxima sessão de treino.
+2. **Dependência de Checkpoints**: Assim como todo formato neural, a descompressão requer exatamente o mesmo modelo e pesos de treino que comprimiram a imagem.
+3. **Espaço de Cor**: Atualmente operamos em espaço de cor RGB puro de 24-bits. Uma implementação futura integrará YCbCr 4:2:0 para melhorar em mais 15-20% as taxas de bitrate.
