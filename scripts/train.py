@@ -2,13 +2,11 @@ import argparse
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-from torchvision.datasets import ImageFolder
 from torchvision.utils import make_grid
 from torch.utils.tensorboard import SummaryWriter
 from PIL import Image
@@ -411,14 +409,14 @@ def main():
             # Gravação visual imediata do primeiro lote ou a cada 100 lotes
             if global_step == 0 or global_step % 100 == 0:
                 with torch.no_grad():
-                      num_display = min(4, B)
-                      orig_grid = make_grid(x[:num_display], normalize=True)
-                      recon_grid = make_grid(x_hat[:num_display], normalize=True)
-                      sfm_grid = make_grid(sfm[:num_display], normalize=True)
-                      
-                      writer.add_image("Visual/Original", orig_grid, global_step)
-                      writer.add_image("Visual/Reconstructed", recon_grid, global_step)
-                      writer.add_image("Visual/Structural_Fidelity_Mask", sfm_grid, global_step)
+                    num_display = min(4, B)
+                    orig_grid = make_grid(x[:num_display], normalize=True)
+                    recon_grid = make_grid(x_hat[:num_display], normalize=True)
+                    sfm_grid = make_grid(sfm[:num_display], normalize=True)
+                    
+                    writer.add_image("Visual/Original", orig_grid, global_step)
+                    writer.add_image("Visual/Reconstructed", recon_grid, global_step)
+                    writer.add_image("Visual/Structural_Fidelity_Mask", sfm_grid, global_step)
 
             if i % 10 == 0:
                 print(f"Época [{epoch+1}/{args.epochs}] | Batch [{i}/{len(dataloader)}] | "
