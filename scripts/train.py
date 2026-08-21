@@ -188,6 +188,7 @@ def main():
     parser.add_argument("--no_lpips", action="store_true", help="Desativar perda perceptual LPIPS")
     parser.add_argument("--save_path", type=str, default="checkpoints", help="Pasta para salvar checkpoints")
     parser.add_argument("--gan_warmup_frac", type=float, default=0.3, help="Fração de épocas de warmup sem GAN")
+    parser.add_argument("--resume", type=str, default="", help="Caminho para o checkpoint .pth para continuar o treinamento")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -232,15 +233,74 @@ def main():
     aux_optimizer = optim.Adam(aux_parameters, lr=1e-3)
     optimizer_d = optim.Adam(discriminator.parameters(), lr=args.lr * 0.5)
 
+    start_epoch = 0
+    if args.resume:
+        if os.path.exists(args.resume):
+            print(f"Carregando checkpoint de: {args.resume}")
+            checkpoint = torch.load(args.resume, map_location=device)
+            
+            if 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+                print(" -> Pesos do modelo carregados com sucesso.")
+            else:
+                print(" -> Aviso: 'model_state_dict' não encontrado no checkpoint.")
+
+            if 'discriminator_state_dict' in checkpoint:
+                discriminator.load_state_dict(checkpoint['discriminator_state_dict'])
+                print(" -> Pesos do discriminador carregados com sucesso.")
+            else:
+                print(" -> Aviso: 'discriminator_state_dict' não encontrado no checkpoint.")
+
+            if 'optimizer_state_dict' in checkpoint:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                print(" -> Estado do otimizador principal carregado.")
+            else:
+                print(" -> Aviso: 'optimizer_state_dict' não encontrado no checkpoint.")
+
+            if 'aux_optimizer_state_dict' in checkpoint:
+                aux_optimizer.load_state_dict(checkpoint['aux_optimizer_state_dict'])
+                print(" -> Estado do otimizador auxiliar carregado.")
+            else:
+                print(" -> Aviso: 'aux_optimizer_state_dict' não encontrado no checkpoint.")
+
+            if 'optimizer_d_state_dict' in checkpoint:
+                optimizer_d.load_state_dict(checkpoint['optimizer_d_state_dict'])
+                print(" -> Estado do otimizador do discriminador carregado.")
+            else:
+                print(" -> Aviso: 'optimizer_d_state_dict' não encontrado no checkpoint.")
+
+            if 'epoch' in checkpoint:
+                start_epoch = checkpoint['epoch']
+                print(f" -> Retomando o treinamento a partir da época {start_epoch}")
+            else:
+                print(" -> Aviso: 'epoch' não encontrado no checkpoint. Retomando da época 0.")
+        else:
+            print(f"Erro: Arquivo de checkpoint '{args.resume}' não encontrado.")
+            return
+
+    # Schedulers
     milestones = [int(args.epochs * 0.6), int(args.epochs * 0.88)]
     lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
     lr_scheduler_d = optim.lr_scheduler.MultiStepLR(optimizer_d, milestones=milestones, gamma=0.1)
+    
+    # Avança os LR schedulers se o treino for retomado
+    if start_epoch > 0:
+        for _ in range(start_epoch):
+            lr_scheduler.step()
+            lr_scheduler_d.step()
+
     print(f"Milestones do Scheduler (Decaimento LR): {milestones}")
+    print(f"Taxa de Aprendizado (LR) Inicial do Otimizador: {optimizer.param_groups[0]['lr']}")
 
     criterion = NIFLoss(use_lpips=not args.no_lpips, device=device)
 
+    # Verifica se já completou as épocas solicitadas
+    if start_epoch >= args.epochs:
+        print(f"Aviso: A época retomada ({start_epoch}) já alcançou ou superou as épocas totais solicitadas ({args.epochs}). Nada a treinar.")
+        return
+
     # 3. Loop de Treinamento
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         model.train()
         discriminator.train()
         epoch_loss = 0
