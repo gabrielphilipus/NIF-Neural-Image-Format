@@ -67,6 +67,7 @@ venv.bak/
 # Project-specific ignored folders/files
 DIV2K_train_HR/
 checkpoints/
+checkpoints_subset/
 results/
 imagem_comprimida.nif
 imagem_reconstruida.png
