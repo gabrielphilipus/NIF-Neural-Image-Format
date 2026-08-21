@@ -47,7 +47,7 @@ class NIFLoss(nn.Module):
     """
     def __init__(self, use_lpips=True, device="cpu"):
         super().__init__()
-        self.ms_ssim = MS_SSIM(data_range=1.0, size_average=True, channel=3)
+        self.ms_ssim = MS_SSIM(data_range=1.0, size_average=False, channel=3)
         self.use_lpips = use_lpips
         if use_lpips:
             # LPIPS baseado em AlexNet ou VGG (AlexNet é mais rápido e consome menos memória)
@@ -58,24 +58,25 @@ class NIFLoss(nn.Module):
 
     def forward(self, x, x_hat, likelihoods, sfm, q, lambda_min=10.0, lambda_max=1000.0):
         B, C, H, W = x.size()
-        num_pixels = B * H * W
 
-        # 1. Taxa de bits (Rate Loss): Bits per Pixel (bpp)
-        # bpp = -log2(p) / num_pixels
-        bpp_y = torch.log(likelihoods["y"]).sum() / (-num_pixels * torch.log(torch.tensor(2.0, device=x.device)))
-        bpp_z = torch.log(likelihoods["z"]).sum() / (-num_pixels * torch.log(torch.tensor(2.0, device=x.device)))
-        rate_loss = bpp_y + bpp_z
+        # 1. Taxa de bits (Rate Loss): Bits per Pixel (bpp) por amostra
+        num_pixels_per_sample = H * W
+        log_lik_y = torch.log(likelihoods["y"]).flatten(start_dim=1).sum(dim=1)
+        log_lik_z = torch.log(likelihoods["z"]).flatten(start_dim=1).sum(dim=1)
+        bpp_y_per_sample = log_lik_y / (-num_pixels_per_sample * torch.log(torch.tensor(2.0, device=x.device)))
+        bpp_z_per_sample = log_lik_z / (-num_pixels_per_sample * torch.log(torch.tensor(2.0, device=x.device)))
+        rate_loss_per_sample = bpp_y_per_sample + bpp_z_per_sample # Shape [B]
 
-        # 2. Perda de Distorção (Distortion Loss)
-        # MSE pura (fidelidade pixel-a-pixel)
-        mse_loss = nn.functional.mse_loss(x, x_hat)
+        # 2. Perda de Distorção (Distortion Loss) por amostra
+        # MSE pura (fidelidade pixel-a-pixel) por amostra
+        mse_loss_per_sample = nn.functional.mse_loss(x, x_hat, reduction='none').flatten(start_dim=1).mean(dim=1) # Shape [B]
 
-        # MS-SSIM (fidelidade de estrutura e brilho perceptual)
+        # MS-SSIM (fidelidade de estrutura e brilho perceptual) por amostra
         # MS_SSIM retorna valor de 0 a 1 (1 é perfeito), por isso minimizamos 1 - MS-SSIM
-        msssim_val = self.ms_ssim(x, x_hat)
-        msssim_loss = 1.0 - msssim_val
+        msssim_val = self.ms_ssim(x, x_hat) # Shape [B]
+        msssim_loss_per_sample = 1.0 - msssim_val # Shape [B]
 
-        # LPIPS mascarada por SFM (evitar alucinação generativa)
+        # LPIPS mascarada por SFM (evitar alucinação generativa) por amostra
         if self.use_lpips:
             # lpips_metric retorna mapa de erro espacial [B, 1, H_feat, W_feat]
             lpips_map = self.lpips_metric(x, x_hat)
@@ -87,35 +88,35 @@ class NIFLoss(nn.Module):
             # Em áreas com alta fidelidade estrutural (sfm próximo de 1), atenuamos a perda perceptual pura
             # para dar preferência a MS-SSIM e MSE rígidos.
             # Em áreas de textura estocástica (sfm próximo de 0), permitimos que o LPIPS guie a otimização.
-            weighted_lpips = (lpips_map * (1.0 - sfm_resized)).mean()
+            weighted_lpips_per_sample = (lpips_map * (1.0 - sfm_resized)).flatten(start_dim=1).mean(dim=1) # Shape [B]
         else:
-            weighted_lpips = torch.tensor(0.0, device=x.device)
+            weighted_lpips_per_sample = torch.zeros(B, device=x.device)
 
-        # 3. Mapeamento Exponencial de Lambda para Taxa Variável
+        # 3. Mapeamento Exponencial de Lambda para Taxa Variável por amostra
         # lambda(q) = lambda_min * (lambda_max / lambda_min) ^ q
-        lambda_val = lambda_min * ((lambda_max / lambda_min) ** q)
-        lambda_mean = lambda_val.mean()
+        q_flat = q.squeeze(1) # Shape [B]
+        lambda_val = lambda_min * ((lambda_max / lambda_min) ** q_flat) # Shape [B]
 
-        # Pesos dinâmicos baseados no nível de qualidade (q)
-        q_mean = q.mean()
-        lpips_w = 0.1 + 0.4 * (1.0 - q_mean)
-        mse_w = 0.5 - 0.2 * (1.0 - q_mean)
-        msssim_w = 1.0 - mse_w - lpips_w
+        # Pesos dinâmicos baseados no nível de qualidade (q) por amostra
+        lpips_w = 0.1 + 0.4 * (1.0 - q_flat) # Shape [B]
+        mse_w = 0.5 - 0.2 * (1.0 - q_flat) # Shape [B]
+        msssim_w = 1.0 - mse_w - lpips_w # Shape [B]
 
         if not self.use_lpips:
             total_w = mse_w + msssim_w
             mse_w = mse_w / total_w
             msssim_w = msssim_w / total_w
-            lpips_w = 0.0
+            lpips_w = torch.zeros_like(lpips_w)
 
-        # Distorção total balanceada dinamicamente
-        distortion = mse_w * mse_loss + msssim_w * msssim_loss
+        # Distorção total balanceada dinamicamente por amostra
+        distortion_per_sample = mse_w * mse_loss_per_sample + msssim_w * msssim_loss_per_sample
         if self.use_lpips:
-            distortion = distortion + lpips_w * weighted_lpips
+            distortion_per_sample = distortion_per_sample + lpips_w * weighted_lpips_per_sample
 
-        total_loss = rate_loss + lambda_mean * distortion
+        total_loss_per_sample = rate_loss_per_sample + lambda_val * distortion_per_sample
+        total_loss = total_loss_per_sample.mean()
 
-        return total_loss, rate_loss, mse_loss, msssim_loss, weighted_lpips
+        return total_loss, rate_loss_per_sample.mean(), mse_loss_per_sample.mean(), msssim_loss_per_sample.mean(), weighted_lpips_per_sample.mean()
 
 
 class ImageFolderCustom(Dataset):
