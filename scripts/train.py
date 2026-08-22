@@ -220,7 +220,7 @@ def main():
         return
 
     # 2. Inicialização do Modelo, Otimizador e Perda
-    model = NIFCodec(num_filters=128, latent_dim=192, num_slices=8).to(device)
+    model = NIFCodec(num_filters=128, latent_dim=192, num_slices=8, use_sigmoid=True).to(device)
     discriminator = NIFDiscriminator().to(device)
     
     # Separação de parâmetros para Learning Rate diferenciada

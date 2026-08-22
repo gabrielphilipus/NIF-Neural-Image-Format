@@ -158,11 +158,12 @@ class NIFCodec(CompressionModel):
     - Modelo de entropia híbrido (Channel-wise + Spatial Checkerboard).
     - Gerador de Máscara de Fidelidade Estrutural (SFM) para queda generativa seletiva.
     """
-    def __init__(self, num_filters=128, latent_dim=192, num_slices=8):
+    def __init__(self, num_filters=128, latent_dim=192, num_slices=8, use_sigmoid=False):
         super().__init__()
         self.num_filters = num_filters
         self.latent_dim = latent_dim
         self.num_slices = num_slices
+        self.use_sigmoid = use_sigmoid
 
         # 1. Redes de condicionamento de qualidade
         self.cond_enc1 = QualityConditioningNetwork(num_filters)
@@ -175,7 +176,7 @@ class NIFCodec(CompressionModel):
         self.cond_dec3 = QualityConditioningNetwork(num_filters)
         self.cond_dec4 = QualityConditioningNetwork(3)
 
-        self.latent_scaler = LatentScaling(latent_dim, use_sigmoid=False)
+        self.latent_scaler = LatentScaling(latent_dim, use_sigmoid=use_sigmoid)
 
         # 2. Análise (Encoder)
         self.enc_conv1 = nn.Conv2d(3, num_filters, kernel_size=5, stride=2, padding=2)
