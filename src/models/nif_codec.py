@@ -111,19 +111,21 @@ class QualityConditioningNetwork(nn.Module):
 class LatentScaling(nn.Module):
     """
     Módulo para prever um fator de escala multiplicativo por canal para o latente y,
-    com base na qualidade q. Força a quantização a ser sensível a q.
+    com base na qualidade q. Bounded em [min_scale, max_scale] para evitar inflamento livre.
     """
-    def __init__(self, channels):
+    def __init__(self, channels, min_scale=0.5, max_scale=1.5):
         super().__init__()
+        self.min_scale = min_scale
+        self.max_scale = max_scale
         self.fc = nn.Sequential(
             nn.Linear(1, 32),
             nn.ReLU(inplace=True),
-            nn.Linear(32, channels),
-            nn.Softplus()
+            nn.Linear(32, channels)
         )
         
     def forward(self, q):
-        scale = self.fc(q)
+        raw = self.fc(q)
+        scale = self.min_scale + (self.max_scale - self.min_scale) * torch.sigmoid(raw)
         return scale.unsqueeze(-1).unsqueeze(-1)
 
 

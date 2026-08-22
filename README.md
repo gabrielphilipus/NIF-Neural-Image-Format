@@ -127,6 +127,17 @@ python scripts/benchmark_latency.py
 
 ---
 
+## ↳ Comparação Honesta com o Estado da Arte (JPEG Baseline)
+
+Para calibrar as expectativas de progresso do NIF em relação a formatos maduros do mercado:
+* No bitrate mais alto testado (**$q=0.90$ com $\approx 1.37\text{ bpp}$**), o NIF entrega **$28.45\text{ dB}$ de PSNR** e **$0.0501$ de LPIPS**.
+* No mesmo bitrate exato de **$1.368\text{ bpp}$**, o **JPEG (em $q=75$)** atinge **$34.52\text{ dB}$ de PSNR** e **$0.0240$ de LPIPS**.
+
+> [!IMPORTANT]
+> O JPEG (um codec clássico de 1992) ainda supera o NIF por **$6.07\text{ dB}$ em PSNR** e **$2\times$ em LPIPS**. Isso ocorre devido às limitações de tamanho de parâmetros da nossa rede móvel e do pipeline inicial. O objetivo principal do NIF é validar o controle dinâmico de taxa e latência em redes neurais de ponta-a-ponta, e não paridade imediata de produção com codecs legados consolidados em hardware.
+
+---
+
 ## ↳ Limitações & Possíveis Melhorias
 O formato NIF é um projeto experimental de pesquisa em compressão neural de imagens e possui as seguintes limitações conhecidas:
 1. **Ineficiência FiLM em Extremos**: As MLPs convolucionais FiLM (`cond_enc`/`cond_dec`) demonstram aprendizado fraco no desvio padrão de pesos ($\approx 0.08$), limitando o ganho de PSNR absoluto em bpp alto. Recomenda-se aplicar taxas de aprendizado ainda maiores especificamente na MLP FiLM em futuros treinos.
