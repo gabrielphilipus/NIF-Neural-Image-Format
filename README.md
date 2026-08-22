@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org/)
 
-O **NIF (Neural Image Format)** é um formato e codec de compressão de imagens de ponta a ponta baseado em redes neurais profundas (*Learned Image Compression*). Desenvolvido para superar as limitações de artefatos em blocos dos codecs legados, o NIF combina modulação contínua de taxa (*FiLM Conditioning*), modelagem de entropia híbrida (Channel-wise + Spatial Checkerboard), **DPCM Noise Shaping no espaço latente** e decodificação altamente paralela.
+O **NIF (Neural Image Format)** é um formato e codec de compressão de imagens de ponta a ponta baseado em redes neurais profundas (*Learned Image Compression*). Desenvolvido para superar as limitações de artefatos em blocos dos codecs legados, o NIF combina modulação contínua de taxa (*FiLM Conditioning*), modelagem de entropia híbrida (Channel-wise + Spatial Checkerboard), DPCM Noise Shaping no espaço latente e decodificação altamente paralela.
 
 ---
 
