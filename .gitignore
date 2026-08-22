@@ -49,12 +49,6 @@ coverage.xml
 .pytest_cache/
 cover/
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
 # Environments
 .env
 .venv
@@ -64,22 +58,37 @@ ENV/
 env.bak/
 venv.bak/
 
-# Project-specific ignored folders/files
+# Project-specific Checkpoints & Models
+checkpoints*/
+checkpoints_v2/
+checkpoints_v3*/
+checkpoints_v4*/
+checkpoints_sweep_*/
+checkpoints_disambiguation_*/
+checkpoints_sanity/
+checkpoints_test/
+*.pth
+*.pt
+*.onnx
+
+# Data & Dataset Folders
 DIV2K_train_HR/
 DIV2K_subset/
-checkpoints/
-checkpoints_subset/
-checkpoints_test/
-checkpoints_test_residual/
-checkpoints_test_importance/
-checkpoints_v3_residual/
-checkpoints_v3_production/
-checkpoints_backup_pre_fix/
+kodak24/
+kodak24_sample/
+kodak.zip
 results/
+
+# Temporary binary test outputs
 imagem_comprimida.nif
 imagem_reconstruida.png
 test_*.nif
 test_*.png
-kodak.zip
-kodak24/
-kodak24_sample/
+temp_*.nif
+temp_*.png
+*.nif
+
+# Logs & TensorBoard
+*.log
+logs/
+events.out.tfevents.*

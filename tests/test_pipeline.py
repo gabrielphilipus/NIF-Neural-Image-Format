@@ -176,13 +176,14 @@ class TestNIFPipeline(unittest.TestCase):
         y_strings = [[b"slice_0_anchor"], [b"slice_0_non_anchor"], [b"slice_1"]]
         
         temp_nif_path = "temp_test_image.nif"
+        ckpt_hash = b"\x12\x34\x56\x78"
         
         try:
-            # Salva o arquivo binário
-            save_nif_file(temp_nif_path, width, height, quality_int, z_shape, z_string, y_strings)
+            # Salva o arquivo binário com hash
+            save_nif_file(temp_nif_path, width, height, quality_int, z_shape, z_string, y_strings, ckpt_hash)
             
             # Carrega o arquivo binário
-            w_rec, h_rec, q_rec, z_shape_rec, z_string_rec, y_strings_rec = load_nif_file(temp_nif_path)
+            w_rec, h_rec, q_rec, z_shape_rec, z_string_rec, y_strings_rec, hash_rec = load_nif_file(temp_nif_path)
             
             # Compara
             self.assertEqual(w_rec, width)
@@ -191,6 +192,7 @@ class TestNIFPipeline(unittest.TestCase):
             self.assertEqual(z_shape_rec, z_shape)
             self.assertEqual(z_string_rec, z_string)
             self.assertEqual(y_strings_rec, y_strings)
+            self.assertEqual(hash_rec, ckpt_hash)
             
         finally:
             if os.path.exists(temp_nif_path):
