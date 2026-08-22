@@ -111,21 +111,34 @@ class QualityConditioningNetwork(nn.Module):
 class LatentScaling(nn.Module):
     """
     Módulo para prever um fator de escala multiplicativo por canal para o latente y,
-    com base na qualidade q. Bounded em [min_scale, max_scale] para evitar inflamento livre.
+    com base na qualidade q. Suporta Softplus (retrocompatibilidade) ou Sigmoid limitado.
     """
-    def __init__(self, channels, min_scale=0.5, max_scale=1.5):
+    def __init__(self, channels, use_sigmoid=False, min_scale=0.5, max_scale=1.5):
         super().__init__()
+        self.use_sigmoid = use_sigmoid
         self.min_scale = min_scale
         self.max_scale = max_scale
-        self.fc = nn.Sequential(
-            nn.Linear(1, 32),
-            nn.ReLU(inplace=True),
-            nn.Linear(32, channels)
-        )
+        
+        if use_sigmoid:
+            self.fc = nn.Sequential(
+                nn.Linear(1, 32),
+                nn.ReLU(inplace=True),
+                nn.Linear(32, channels)
+            )
+        else:
+            self.fc = nn.Sequential(
+                nn.Linear(1, 32),
+                nn.ReLU(inplace=True),
+                nn.Linear(32, channels),
+                nn.Softplus()
+            )
         
     def forward(self, q):
         raw = self.fc(q)
-        scale = self.min_scale + (self.max_scale - self.min_scale) * torch.sigmoid(raw)
+        if self.use_sigmoid:
+            scale = self.min_scale + (self.max_scale - self.min_scale) * torch.sigmoid(raw)
+        else:
+            scale = raw
         return scale.unsqueeze(-1).unsqueeze(-1)
 
 
@@ -162,7 +175,7 @@ class NIFCodec(CompressionModel):
         self.cond_dec3 = QualityConditioningNetwork(num_filters)
         self.cond_dec4 = QualityConditioningNetwork(3)
 
-        self.latent_scaler = LatentScaling(latent_dim)
+        self.latent_scaler = LatentScaling(latent_dim, use_sigmoid=False)
 
         # 2. Análise (Encoder)
         self.enc_conv1 = nn.Conv2d(3, num_filters, kernel_size=5, stride=2, padding=2)

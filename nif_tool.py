@@ -2,6 +2,7 @@ import argparse
 import os
 import struct
 import torch
+import hashlib
 from torchvision import transforms
 from PIL import Image
 import numpy as np
@@ -12,7 +13,24 @@ from src.models.nif_codec import NIFCodec
 MAGIC_BYTES = b"NIF1"
 
 
-def save_nif_file(output_path, width, height, quality_int, z_shape, z_string, y_strings):
+def get_checkpoint_md5_hash(checkpoint_path):
+    """
+    Retorna os primeiros 4 bytes do MD5 do checkpoint para validação de compatibilidade.
+    Lê apenas a cabeceira do arquivo (64KB) para ser instantâneo.
+    """
+    if not checkpoint_path or not os.path.exists(checkpoint_path):
+        return b"\x00\x00\x00\x00"
+    hasher = hashlib.md5()
+    try:
+        with open(checkpoint_path, "rb") as f:
+            chunk = f.read(65536)
+            hasher.update(chunk)
+        return hasher.digest()[:4]
+    except Exception:
+        return b"\x00\x00\x00\x00"
+
+
+def save_nif_file(output_path, width, height, quality_int, z_shape, z_string, y_strings, ckpt_hash_bytes):
     """
     Serializa os dados estruturados de compressão em um arquivo binário (.nif).
     """
@@ -25,10 +43,13 @@ def save_nif_file(output_path, width, height, quality_int, z_shape, z_string, y_
         header = struct.pack("!HHBBB", width, height, 3, quality_int, 0)
         f.write(header)
         
-        # 3. Metadados de formato do Hyperprior: shape de z (H_z, W_z)
+        # 3. Grava Hash MD5 do Checkpoint (4 bytes) para auditoria de produção
+        f.write(ckpt_hash_bytes)
+        
+        # 4. Metadados de formato do Hyperprior: shape de z (H_z, W_z)
         f.write(struct.pack("!HH", z_shape[0], z_shape[1]))
         
-        # 4. Stream do Hyperprior z
+        # 5. Stream do Hyperprior z
         # Gravamos o tamanho do z_string (4B) e os bytes
         z_bytes = z_string[0]
         f.write(struct.pack("!I", len(z_bytes)))
@@ -65,18 +86,22 @@ def load_nif_file(input_path):
     width, height, channels, quality_int, flags = struct.unpack_from("!HHBBB", data, offset)
     offset += 7
     
-    # 3. Ler Shape do Hyperprior z
+    # 3. Ler Hash MD5 do Checkpoint (4 bytes)
+    ckpt_hash_bytes = data[offset:offset+4]
+    offset += 4
+    
+    # 4. Ler Shape do Hyperprior z
     z_h, z_w = struct.unpack_from("!HH", data, offset)
     offset += 4
     z_shape = (z_h, z_w)
     
-    # 4. Ler bytes do Hyperprior
+    # 5. Ler bytes do Hyperprior
     z_len, = struct.unpack_from("!I", data, offset)
     offset += 4
     z_string = [data[offset:offset+z_len]]
     offset += z_len
     
-    # 5. Ler strings do Latente Principal y
+    # 6. Ler strings do Latente Principal y
     num_strings, = struct.unpack_from("!B", data, offset)
     offset += 1
     
@@ -88,11 +113,11 @@ def load_nif_file(input_path):
         offset += y_len
         y_strings.append([y_bytes])
         
-    return width, height, quality_int, z_shape, z_string, y_strings
+    return width, height, quality_int, z_shape, z_string, y_strings, ckpt_hash_bytes
 
 
 @torch.no_grad()
-def compress_image(model, image_path, output_path, q_val, device):
+def compress_image(model, image_path, output_path, q_val, device, ckpt_hash_bytes):
     """
     Carrega uma imagem e gera o arquivo NIF compactado.
     """
@@ -121,7 +146,7 @@ def compress_image(model, image_path, output_path, q_val, device):
     z_string = out["strings"][0]
     y_strings = out["strings"][1]
     
-    save_nif_file(output_path, w, h, quality_int, out["shape"], z_string, y_strings)
+    save_nif_file(output_path, w, h, quality_int, out["shape"], z_string, y_strings, ckpt_hash_bytes)
     
     # Calcula estatísticas de compressão
     orig_size = os.path.getsize(image_path)
@@ -143,13 +168,20 @@ def compress_image(model, image_path, output_path, q_val, device):
 
 
 @torch.no_grad()
-def decompress_image(model, input_path, output_path, device):
+def decompress_image(model, input_path, output_path, device, ckpt_hash_bytes):
     """
     Carrega o arquivo NIF e reconstrói a imagem original.
     """
     # Carrega os dados do arquivo binário
-    w, h, quality_int, z_shape, z_string, y_strings = load_nif_file(input_path)
+    w, h, quality_int, z_shape, z_string, y_strings, file_ckpt_hash = load_nif_file(input_path)
     
+    # Valida compatibilidade do hash do checkpoint
+    if file_ckpt_hash != ckpt_hash_bytes and file_ckpt_hash != b"\x00\x00\x00\x00":
+        print(f"\n[WARNING] ALERTA DE COMPATIBILIDADE DE MODELO:")
+        print(f"  * O arquivo foi compactado com outro checkpoint de pesos!")
+        print(f"  * Hash do arquivo: {file_ckpt_hash.hex()} | Hash ativo local: {ckpt_hash_bytes.hex()}")
+        print(f"  * A descompressão pode resultar em NaNs ou ruído visual severo.\n")
+        
     q_val = quality_int / 255.0
     quality = torch.tensor([[q_val]], device=device)
     
@@ -201,10 +233,13 @@ def main():
         print(f"Erro ao carregar o checkpoint: {e}")
         return
 
+    # Obtém o hash de compatibilidade do checkpoint
+    ckpt_hash = get_checkpoint_md5_hash(args.checkpoint)
+
     if args.mode == "compress":
-        compress_image(model, args.input, args.output, args.quality, device)
+        compress_image(model, args.input, args.output, args.quality, device, ckpt_hash)
     elif args.mode == "decompress":
-        decompress_image(model, args.input, args.output, device)
+        decompress_image(model, args.input, args.output, device, ckpt_hash)
 
 if __name__ == "__main__":
     main()
