@@ -9,7 +9,7 @@ O **NIF (Neural Image Format)** é um formato e codec de compressão de imagens 
 
 ---
 
-## 🌟 Principais Inovações Tecnológicas
+##  Principais Inovações Tecnológicas
 
 1. **Modulação Contínua de Taxa de Bits (FiLM-Conditioned)**:
    * Controle contínuo de qualidade ($q \in [0.1, 1.0]$) com um único conjunto de pesos treinado, eliminando a necessidade de múltiplos modelos para diferentes qualidades.
@@ -23,7 +23,7 @@ O **NIF (Neural Image Format)** é um formato e codec de compressão de imagens 
 
 ---
 
-## 📊 Resultados e Benchmark Rigoroso (Dataset Kodak24)
+##  Resultados e Benchmark Rigoroso (Dataset Kodak24)
 
 Todos os resultados foram medidos de forma pareada nas 24 imagens do dataset **Kodak24**, com avaliação **interpolada no mesmo bitrate (*Bitrate-Matched*)** contra codecs industriais consolidados:
 
@@ -42,7 +42,7 @@ Todos os resultados foram medidos de forma pareada nas 24 imagens do dataset **K
 
 ---
 
-## ⚡ Latência & Custo Operacional em Nuvem (AWS EC2 g4dn.xlarge)
+##  Latência & Custo Operacional em Nuvem (AWS EC2 g4dn.xlarge)
 
 Medição empírica de latência e projeção de custo para processamento em larga escala (**1 Milhão de Imagens**) na instância de referência AWS EC2 `g4dn.xlarge` ($0.526/hora):
 
@@ -57,7 +57,7 @@ Medição empírica de latência e projeção de custo para processamento em lar
 
 ---
 
-## 🛠️ Instalação e Uso Rápido
+##  Instalação e Uso Rápido
 
 ### 1. Clonar e Instalar Dependências
 ```bash
@@ -85,7 +85,7 @@ Acesse em seu navegador: `http://localhost:5000`
 
 ---
 
-## 📦 Model Zoo & Checkpoints Pré-Treinados
+##  Model Zoo & Checkpoints Pré-Treinados
 
 Os pesos treinados dos modelos estão disponíveis para download na aba de [Releases](https://github.com/gabrielphilipus/NIF-Neural-Image-Format/releases):
 
@@ -97,7 +97,7 @@ Os pesos treinados dos modelos estão disponíveis para download na aba de [Rele
 
 ---
 
-## 🧪 Testes Unitários e Integração Contínua (CI)
+##  Testes Unitários e Integração Contínua (CI)
 
 O repositório possui uma suite de testes unitários automatizados cobrindo a integridade do compressor, estabilidade de variância zero e serialização de cabeçalhos binários:
 ```bash
