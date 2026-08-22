@@ -214,6 +214,7 @@ def main():
     parser.add_argument("--input", type=str, required=True, help="Caminho do arquivo de entrada (.png/.jpg para compress, .nif para decompress)")
     parser.add_argument("--output", type=str, required=True, help="Caminho do arquivo de saída (.nif para compress, .png para decompress)")
     parser.add_argument("--quality", "-q", type=float, default=0.5, help="Fator de qualidade de compressão (0.1 a 1.0) - Apenas para compressão")
+    parser.add_argument("--use_sigmoid", action="store_true", default=None, help="Forçar uso de restrição Sigmoid no LatentScaling (auto-detectado por padrão)")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -221,11 +222,14 @@ def main():
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
     
+    # Auto-detecta uso de Sigmoid baseado no checkpoint ou flag explícita
+    use_sigmoid = args.use_sigmoid if args.use_sigmoid is not None else ("v4" in args.checkpoint or "sanity" in args.checkpoint)
+    
     # Inicializa modelo e carrega pesos
-    model = NIFCodec(num_filters=128, latent_dim=192, num_slices=8).to(device)
+    model = NIFCodec(num_filters=128, latent_dim=192, num_slices=8, use_sigmoid=use_sigmoid).to(device)
     try:
         checkpoint = torch.load(args.checkpoint, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        model.load_state_dict(checkpoint.get('model_state_dict', checkpoint.get('state_dict', checkpoint)))
         model.eval()
         # Inicializa tabelas CDF
         model.update(force=True)
