@@ -2,6 +2,7 @@ import argparse
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -176,9 +177,56 @@ class SafeResize(object):
         return img
 
 
+@torch.no_grad()
+def evaluate_validation_rd(model, val_loader, device, writer, epoch, qualities=[0.1, 0.3, 0.5, 0.7, 0.9]):
+    """
+    Avalia o modelo em um conjunto de validação fixo através de múltiplos níveis de qualidade 'q'
+    para monitorar a abertura da curva R-D (Bpp e PSNR) ao longo do treinamento.
+    """
+    model.eval()
+    results = {q: {"bpp": [], "psnr": []} for q in qualities}
+    
+    for x_val, _ in val_loader:
+        x_val = x_val.to(device)
+        B, C, H, W = x_val.shape
+        num_pixels = H * W
+        
+        for q_val in qualities:
+            q_tensor = torch.full((B, 1), q_val, device=device)
+            out = model(x_val, q_tensor)
+            x_hat = torch.clamp(out["x_hat"], 0.0, 1.0)
+            likelihoods = out["likelihoods"]
+            
+            # bpp
+            bpp_y = torch.log(likelihoods["y"]).flatten(start_dim=1).sum(dim=1) / (-num_pixels * torch.log(torch.tensor(2.0, device=device)))
+            bpp_z = torch.log(likelihoods["z"]).flatten(start_dim=1).sum(dim=1) / (-num_pixels * torch.log(torch.tensor(2.0, device=device)))
+            bpp_sample = (bpp_y + bpp_z).mean().item()
+            
+            # PSNR
+            mse_val = torch.mean((x_val - x_hat) ** 2).item()
+            psnr_val = 100.0 if mse_val == 0 else 20.0 * np.log10(1.0 / np.sqrt(mse_val))
+            
+            results[q_val]["bpp"].append(bpp_sample)
+            results[q_val]["psnr"].append(psnr_val)
+            
+    print(f"\n==================================================")
+    print(f" VALIDAÇÃO R-D PERIÓDICA (Época {epoch})")
+    print(f"==================================================")
+    for q_val in qualities:
+        mean_bpp = np.mean(results[q_val]["bpp"])
+        mean_psnr = np.mean(results[q_val]["psnr"])
+        print(f"  * q = {q_val:.1f} | Bitrate: {mean_bpp:.4f} bpp | PSNR: {mean_psnr:.2f} dB")
+        if writer is not None:
+            writer.add_scalar(f"Val_RD/Bpp_q_{q_val:.1f}", mean_bpp, epoch)
+            writer.add_scalar(f"Val_RD/PSNR_q_{q_val:.1f}", mean_psnr, epoch)
+    print(f"==================================================\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Pipeline de Treinamento NIF")
     parser.add_argument("--dataset", type=str, required=True, help="Caminho para o diretório de imagens de treino")
+    parser.add_argument("--val_dataset", type=str, default="kodak24", help="Caminho para dataset de validação (ex: kodak24)")
+    parser.add_argument("--val_freq", type=int, default=5, help="Frequência em épocas para avaliação de validação R-D")
     parser.add_argument("--epochs", type=int, default=250, help="Número de épocas")
     parser.add_argument("--batch_size", type=int, default=8, help="Tamanho do lote (batch size)")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate inicial")
@@ -210,14 +258,29 @@ def main():
         transforms.ToTensor(),
     ])
 
+    val_transform = transforms.Compose([
+        SafeResize(256),
+        transforms.CenterCrop(256),
+        transforms.ToTensor(),
+    ])
+
     try:
         # Usa o carregador customizado para aceitar pastas de imagens planas
         dataset = ImageFolderCustom(args.dataset, transform=transform)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
-        print(f"Dataset carregado com {len(dataset)} imagens de treino.")
+        print(f"Dataset de treino carregado com {len(dataset)} imagens.")
     except Exception as e:
-        print(f"Erro ao carregar o dataset: {e}")
+        print(f"Erro ao carregar o dataset de treino: {e}")
         return
+
+    val_dataloader = None
+    if args.val_dataset and os.path.exists(args.val_dataset):
+        try:
+            val_dataset = ImageFolderCustom(args.val_dataset, transform=val_transform)
+            val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=True)
+            print(f"Dataset de validação carregado com {len(val_dataset)} imagens de: {args.val_dataset}")
+        except Exception as e:
+            print(f"Aviso ao carregar dataset de validação: {e}")
 
     # 2. Inicialização do Modelo, Otimizador e Perda
     model = NIFCodec(num_filters=128, latent_dim=192, num_slices=8, use_sigmoid=True).to(device)
@@ -454,7 +517,9 @@ def main():
         if not args.no_lpips:
             writer.add_scalar("Epoch/LPIPS", epoch_lpips / num_batches, epoch + 1)
 
-        # Log visual removido daqui pois agora ocorre durante a época no global_step 0 e de 100 em 100 lotes
+        # Avaliação de validação periódica da curva R-D (Bpp e PSNR por q)
+        if val_dataloader is not None and (epoch + 1) % args.val_freq == 0:
+            evaluate_validation_rd(model, val_dataloader, device, writer, epoch + 1)
 
         # Salva o checkpoint a cada 5 épocas
         if (epoch + 1) % 5 == 0:
