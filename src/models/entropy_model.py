@@ -1,22 +1,172 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from compressai.entropy_models import GaussianMixtureConditional
 from compressai.layers import GDN
 import struct
 import numpy as np
 
-def pack_gmm_string(rv_bytes, abs_max, zero_bitmap):
+def pack_gmm_string(rv_bytes, r_min, r_max, zero_bitmap):
     zb_bytes = zero_bitmap.cpu().to(torch.uint8).numpy().tobytes()
-    header = struct.pack("!iH", abs_max, len(zb_bytes))
+    # h = short com sinal (2 bytes), H = short sem sinal (2 bytes)
+    header = struct.pack("!hhH", r_min, r_max, len(zb_bytes))
     return header + zb_bytes + rv_bytes
 
 def unpack_gmm_string(packed_bytes, device):
-    abs_max, zb_len = struct.unpack("!iH", packed_bytes[:6])
+    r_min, r_max, zb_len = struct.unpack("!hhH", packed_bytes[:6])
     zb_bytes = packed_bytes[6:6+zb_len]
     rv_bytes = packed_bytes[6+zb_len:]
     zb_np = np.frombuffer(zb_bytes, dtype=np.uint8).copy()
     zero_bitmap = torch.from_numpy(zb_np).to(device).to(torch.long)
-    return rv_bytes, abs_max, zero_bitmap
+    return rv_bytes, r_min, r_max, zero_bitmap
+
+
+class AdaptiveRangeGaussianMixtureConditional(GaussianMixtureConditional):
+    """
+    Extensão do GaussianMixtureConditional do CompressAI que implementa
+    o algoritmo de PMF adaptativa de intervalo assimétrico do DLPR.
+    Reduz a tabela CDF de probabilidade ao intervalo [r_min, r_max] da imagem.
+    """
+    @torch.no_grad()
+    def _build_cdf(self, scales, means, weights, r_min, r_max):
+        num_latents = scales.size(1)
+        num_samples = int(r_max - r_min + 1)
+        TINY = 1e-10
+        device = scales.device
+
+        scales = scales.clamp_(0.11, 256)
+        means = means - r_min
+
+        scales_ = scales.unsqueeze(-1).expand(-1, -1, num_samples)
+        means_ = means.unsqueeze(-1).expand(-1, -1, num_samples)
+        weights_ = weights.unsqueeze(-1).expand(-1, -1, num_samples)
+
+        samples = (
+            torch.arange(num_samples).to(device).unsqueeze(0).expand(num_latents, -1)
+        )
+
+        pmf = torch.zeros_like(samples).float()
+        for k in range(self.K):
+            pmf += (
+                0.5
+                * (
+                    1
+                    + torch.erf(
+                        (samples + 0.5 - means_[k]) / ((scales_[k] + TINY) * 2**0.5)
+                    )
+                )
+                - 0.5
+                * (
+                    1
+                    + torch.erf(
+                        (samples - 0.5 - means_[k]) / ((scales_[k] + TINY) * 2**0.5)
+                    )
+                )
+            ) * weights_[k]
+
+        cdf_limit = 2**self.entropy_coder_precision - 1
+        pmf = torch.clamp(pmf, min=1.0 / cdf_limit, max=1.0)
+        pmf_scaled = torch.round(pmf * cdf_limit)
+        pmf_sum = torch.sum(pmf_scaled, 1, keepdim=True).expand(-1, num_samples)
+
+        cdf = F.pad(
+            torch.cumsum(pmf_scaled * cdf_limit / pmf_sum, 1).int(),
+            (1, 0),
+            "constant",
+            0,
+        )
+        pmf_quantized = torch.diff(cdf, dim=1)
+
+        pmf_zero_count = num_samples - torch.count_nonzero(pmf_quantized, dim=1)
+
+        _, pmf_first_stealable_indices = torch.min(
+            torch.where(
+                pmf_quantized > pmf_zero_count.unsqueeze(-1).expand(-1, num_samples),
+                pmf_quantized,
+                torch.tensor(cdf_limit + 1).int(),
+            ),
+            dim=1,
+        )
+
+        pmf_real_zero_indices = (pmf_quantized == 0).nonzero().transpose(0, 1)
+        if pmf_real_zero_indices.numel() > 0:
+            pmf_quantized[pmf_real_zero_indices[0], pmf_real_zero_indices[1]] += 1
+
+        pmf_real_steal_indices = torch.cat(
+            (
+                torch.arange(num_latents).to(device).unsqueeze(-1),
+                pmf_first_stealable_indices.unsqueeze(-1),
+            ),
+            dim=1,
+        ).transpose(0, 1)
+        pmf_quantized[pmf_real_steal_indices[0], pmf_real_steal_indices[1]] -= (
+            pmf_zero_count
+        )
+
+        cdf = F.pad(torch.cumsum(pmf_quantized, 1).int(), (1, 0), "constant", 0)
+        cdf = F.pad(cdf, (0, 1), "constant", cdf_limit + 1)
+
+        return cdf
+
+    def compress(self, y, scales, means, weights):
+        y_quantized = torch.round(y)
+        
+        r_min = int(y_quantized.min().item())
+        r_max = int(y_quantized.max().item())
+        
+        if r_max < r_min:
+            r_max = r_min
+        if r_max == r_min:
+            r_max += 1
+
+        zero_bitmap = torch.where(
+            torch.sum(torch.abs(y_quantized), (3, 2)).squeeze(0) == 0, 0, 1
+        )
+
+        nonzero = torch.nonzero(zero_bitmap).flatten().tolist()
+        symbols = y_quantized[:, nonzero] - r_min
+        
+        cdf = self._build_cdf(
+            *self.reshape_entropy_parameters(scales, means, weights, nonzero), r_min, r_max
+        )
+
+        num_latents = cdf.size(0)
+
+        rv = self.entropy_coder._encoder.encode_with_indexes(
+            symbols.reshape(-1).int().tolist(),
+            torch.arange(num_latents).int().tolist(),
+            cdf.cpu().tolist(),
+            torch.tensor(cdf.size(1)).repeat(num_latents).int().tolist(),
+            torch.tensor(0).repeat(num_latents).int().tolist(),
+        )
+
+        return (rv, r_min, r_max, zero_bitmap), y_quantized
+
+    def decompress(self, strings, r_min, r_max, zero_bitmap, scales, means, weights):
+        nonzero = torch.nonzero(zero_bitmap).flatten().tolist()
+        cdf = self._build_cdf(
+            *self.reshape_entropy_parameters(scales, means, weights, nonzero), r_min, r_max
+        )
+
+        num_latents = cdf.size(0)
+
+        values = self.entropy_coder._decoder.decode_with_indexes(
+            strings,
+            torch.arange(num_latents).int().tolist(),
+            cdf.cpu().tolist(),
+            torch.tensor(cdf.size(1)).repeat(num_latents).int().tolist(),
+            torch.tensor(0).repeat(num_latents).int().tolist(),
+        )
+
+        symbols = torch.tensor(values) + r_min
+        symbols = symbols.reshape(scales.size(0), -1, scales.size(2), scales.size(3))
+
+        y_hat = torch.zeros(
+            scales.size(0), zero_bitmap.size(0), scales.size(2), scales.size(3)
+        )
+        y_hat[:, nonzero] = symbols.float()
+
+        return y_hat
 
 class MaskedConv2d(nn.Conv2d):
     """
@@ -100,8 +250,16 @@ class ChannelCheckerboardEntropyModel(nn.Module):
         assert in_channels % num_slices == 0, f"Canais {in_channels} deve ser divisível por num_slices {num_slices}"
         self.slice_size = in_channels // num_slices
 
-        # Condicionador Gaussiano de Mistura do CompressAI
-        self.gaussian_conditional = GaussianMixtureConditional(K=K)
+        # Condicionador Gaussiano de Mistura Adaptativo
+        self.gaussian_conditional = AdaptiveRangeGaussianMixtureConditional(K=K)
+
+        # Mini-rede para previsão do mapa de importância espacial a partir de hyper_features
+        self.importance_network = nn.Sequential(
+            nn.Conv2d(latent_dim, latent_dim // 2, kernel_size=3, padding=1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(latent_dim // 2, 1, kernel_size=3, padding=1),
+            nn.Sigmoid()
+        )
 
         # Módulos de fusão de contexto para cada fatia
         self.channel_context_networks = nn.ModuleList()
@@ -158,18 +316,30 @@ class ChannelCheckerboardEntropyModel(nn.Module):
     def forward(self, y, hyper_features):
         """
         Durante o treinamento, calculamos a probabilidade usando o modelo GMM.
+        Aplica Channel Residual Learning (Noise Shaping) propagando o resíduo.
+        Aplica também Importance Map para alocação espacial de bits.
         """
         B, C, H, W = y.size()
         device = y.device
         
-        y_slices = torch.chunk(y, self.num_slices, dim=1)
+        # Preve o mapa de importância espacial a partir das hyper_features
+        importance_map = 0.1 + 0.9 * self.importance_network(hyper_features)
+        
+        # Multiplica o latente y pelo mapa de importância
+        y_importance = y * importance_map
+        
+        y_slices = torch.chunk(y_importance, self.num_slices, dim=1)
         y_hat_slices = []
         likelihoods_list = []
 
         checkerboard_mask = self._get_checkerboard_mask(y_slices[0])
+        
+        # Inicializa o resíduo do canal anterior
+        res = torch.zeros(B, self.slice_size, H, W, device=device)
 
         for k in range(self.num_slices):
-            curr_slice = y_slices[k]
+            # Adiciona resíduo à fatia atual
+            curr_slice = y_slices[k] + res
             prev_slices = y_hat_slices
             
             # 1. Obter contexto de canal
@@ -241,27 +411,45 @@ class ChannelCheckerboardEntropyModel(nn.Module):
                 weights=weight
             )
             
+            # Calcula o resíduo para a próxima fatia (Noise Shaping)
+            res = curr_slice - y_hat_slice
+            
             y_hat_slices.append(y_hat_slice)
             likelihoods_list.append(slice_likelihoods)
 
-        y_hat = torch.cat(y_hat_slices, dim=1)
+        y_hat_importance = torch.cat(y_hat_slices, dim=1)
         likelihoods = torch.cat(likelihoods_list, dim=1)
+
+        # Restaura a escala original do latente dividindo pelo mapa de importância
+        y_hat = y_hat_importance / importance_map
 
         return y_hat, likelihoods
 
     def compress(self, y, hyper_features):
         """
-        Compacta o latente 'y' usando GMM e codificação de entropia checkerboard.
+        Compacta o latente 'y' usando GMM e codificação de entropia checkerboard adaptativa.
+        Aplica Channel Residual Learning (Noise Shaping) propagando o resíduo na quantização.
+        Aplica também Importance Map para alocação espacial de bits.
         """
         B, C, H, W = y.size()
         device = y.device
         
-        y_slices = torch.chunk(y, self.num_slices, dim=1)
+        # Preve o mapa de importância espacial a partir das hyper_features
+        importance_map = 0.1 + 0.9 * self.importance_network(hyper_features)
+        
+        # Multiplica o latente y pelo mapa de importância
+        y_importance = y * importance_map
+        
+        y_slices = torch.chunk(y_importance, self.num_slices, dim=1)
         y_hat_slices = []
         strings_list = []
+        
+        # Inicializa o resíduo do canal anterior
+        res = torch.zeros(B, self.slice_size, H, W, device=device)
 
         for k in range(self.num_slices):
-            curr_slice = y_slices[k]
+            # Adiciona resíduo da fatia anterior
+            curr_slice = y_slices[k] + res
             prev_slices = y_hat_slices
             
             if k > 0:
@@ -292,12 +480,6 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             scale_anchor_split, _ = split_checkerboard(scale_anchor)
             weight_anchor_split, _ = split_checkerboard(weight_anchor)
 
-            # Pre-calcular abs_max
-            abs_max = (
-                max(torch.abs(y_k_anchors.max()).int().item(), torch.abs(y_k_anchors.min()).int().item()) + 1
-            )
-            abs_max = 1 if abs_max < 1 else abs_max
-
             # Verificar se as âncoras são todas zero
             y_k_anchors_quant = torch.round(y_k_anchors)
             zero_bitmap = torch.where(
@@ -306,21 +488,21 @@ class ChannelCheckerboardEntropyModel(nn.Module):
 
             if zero_bitmap.sum() == 0:
                 rv = b""
-                packed_anchor = pack_gmm_string(rv, abs_max, zero_bitmap)
+                packed_anchor = pack_gmm_string(rv, 0, 1, zero_bitmap)
                 strings_list.append([packed_anchor])
                 y_k_anchors_hat = torch.zeros_like(y_k_anchors)
             else:
-                # Comprime as âncoras usando GMM
+                # Comprime as âncoras usando o método adaptativo
                 anchor_res, _ = self.gaussian_conditional.compress(
                     y_k_anchors, scale_anchor_split, mu_anchor_split, weight_anchor_split
                 )
-                rv, abs_max, zero_bitmap = anchor_res
-                packed_anchor = pack_gmm_string(rv, abs_max, zero_bitmap)
+                rv, r_min, r_max, zero_bitmap = anchor_res
+                packed_anchor = pack_gmm_string(rv, r_min, r_max, zero_bitmap)
                 strings_list.append([packed_anchor])
 
-                # Decomprime as âncoras localmente para o contexto espacial
+                # Decomprime localmente
                 y_k_anchors_hat = self.gaussian_conditional.decompress(
-                    rv, abs_max, zero_bitmap, scale_anchor_split, mu_anchor_split, weight_anchor_split
+                    rv, r_min, r_max, zero_bitmap, scale_anchor_split, mu_anchor_split, weight_anchor_split
                 ).to(device)
 
             zeros_non_anchors = torch.zeros_like(y_k_non_anchors)
@@ -347,12 +529,6 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             _, scale_non_anchor_split = split_checkerboard(scale_non_anchor)
             _, weight_non_anchor_split = split_checkerboard(weight_non_anchor)
 
-            # Pre-calcular abs_max_na
-            abs_max_na = (
-                max(torch.abs(y_k_non_anchors.max()).int().item(), torch.abs(y_k_non_anchors.min()).int().item()) + 1
-            )
-            abs_max_na = 1 if abs_max_na < 1 else abs_max_na
-
             # Verificar se não-âncoras são todas zero
             y_k_non_anchors_quant = torch.round(y_k_non_anchors)
             zero_bitmap_na = torch.where(
@@ -361,34 +537,42 @@ class ChannelCheckerboardEntropyModel(nn.Module):
 
             if zero_bitmap_na.sum() == 0:
                 rv_na = b""
-                packed_non_anchor = pack_gmm_string(rv_na, abs_max_na, zero_bitmap_na)
+                packed_non_anchor = pack_gmm_string(rv_na, 0, 1, zero_bitmap_na)
                 strings_list.append([packed_non_anchor])
                 y_k_non_anchors_hat = torch.zeros_like(y_k_non_anchors)
             else:
-                # Comprime não-âncoras usando GMM
+                # Comprime não-âncoras usando o método adaptativo
                 non_anchor_res, _ = self.gaussian_conditional.compress(
                     y_k_non_anchors, scale_non_anchor_split, mu_non_anchor_split, weight_non_anchor_split
                 )
-                rv_na, abs_max_na, zero_bitmap_na = non_anchor_res
-                packed_non_anchor = pack_gmm_string(rv_na, abs_max_na, zero_bitmap_na)
+                rv_na, r_min_na, r_max_na, zero_bitmap_na = non_anchor_res
+                packed_non_anchor = pack_gmm_string(rv_na, r_min_na, r_max_na, zero_bitmap_na)
                 strings_list.append([packed_non_anchor])
 
-                # Decomprime não-âncoras localmente
+                # Decomprime localmente
                 y_k_non_anchors_hat = self.gaussian_conditional.decompress(
-                    rv_na, abs_max_na, zero_bitmap_na, scale_non_anchor_split, mu_non_anchor_split, weight_non_anchor_split
+                    rv_na, r_min_na, r_max_na, zero_bitmap_na, scale_non_anchor_split, mu_non_anchor_split, weight_non_anchor_split
                 ).to(device)
 
             y_hat_slice = merge_checkerboard(y_k_anchors_hat, y_k_non_anchors_hat, H, W)
+            
+            # Atualiza o resíduo para a próxima fatia (Noise Shaping)
+            res = curr_slice - y_hat_slice
+            
             y_hat_slices.append(y_hat_slice)
 
         return strings_list
 
     def decompress(self, strings_list, hyper_features, H, W):
         """
-        Decomprime o latente 'y' usando o modelo GMM.
+        Decomprime o latente 'y' usando o modelo GMM adaptativo.
+        Aplica também a reversão do Importance Map.
         """
         B = hyper_features.size(0)
         device = hyper_features.device
+        
+        # Preve o mapa de importância espacial a partir das hyper_features
+        importance_map = 0.1 + 0.9 * self.importance_network(hyper_features)
         
         y_hat_slices = []
         string_idx = 0
@@ -426,13 +610,13 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             # Decomprime as âncoras do GMM
             packed_anchor = strings_list[string_idx][0]
             string_idx += 1
-            rv, abs_max, zero_bitmap = unpack_gmm_string(packed_anchor, device)
+            rv, r_min, r_max, zero_bitmap = unpack_gmm_string(packed_anchor, device)
             
             if zero_bitmap.sum() == 0:
                 y_k_anchors_hat = torch.zeros(B, self.slice_size, H, W // 2, device=device)
             else:
                 y_k_anchors_hat = self.gaussian_conditional.decompress(
-                    rv, abs_max, zero_bitmap, scale_anchor_split, mu_anchor_split, weight_anchor_split
+                    rv, r_min, r_max, zero_bitmap, scale_anchor_split, mu_anchor_split, weight_anchor_split
                 ).to(device)
             
             zeros_non_anchors = torch.zeros(B, self.slice_size, H, W // 2, device=device)
@@ -462,18 +646,21 @@ class ChannelCheckerboardEntropyModel(nn.Module):
             # Decomprime as não-âncoras do GMM
             packed_non_anchor = strings_list[string_idx][0]
             string_idx += 1
-            rv_na, abs_max_na, zero_bitmap_na = unpack_gmm_string(packed_non_anchor, device)
+            rv_na, r_min_na, r_max_na, zero_bitmap_na = unpack_gmm_string(packed_non_anchor, device)
             
             if zero_bitmap_na.sum() == 0:
                 y_k_non_anchors_hat = torch.zeros(B, self.slice_size, H, W // 2, device=device)
             else:
                 y_k_non_anchors_hat = self.gaussian_conditional.decompress(
-                    rv_na, abs_max_na, zero_bitmap_na, scale_non_anchor_split, mu_non_anchor_split, weight_non_anchor_split
+                    rv_na, r_min_na, r_max_na, zero_bitmap_na, scale_non_anchor_split, mu_non_anchor_split, weight_non_anchor_split
                 ).to(device)
 
             # Mescla e acumula
             y_hat_slice = merge_checkerboard(y_k_anchors_hat, y_k_non_anchors_hat, H, W)
             y_hat_slices.append(y_hat_slice)
 
-        y_hat = torch.cat(y_hat_slices, dim=1)
+        y_hat_importance = torch.cat(y_hat_slices, dim=1)
+        
+        # Restaura a escala original do latente dividindo pelo mapa de importância
+        y_hat = y_hat_importance / importance_map
         return y_hat

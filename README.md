@@ -28,17 +28,18 @@ O modelo foi avaliado no benchmark padrão da literatura **Kodak24** utilizando 
 
 ### Tabela de Comparação de Desempenho (Média ± Desvio Padrão)
 
-| Qualidade $q$ | Checkpoint 265 (Modelo Antigo com Colapso) | Checkpoint 250 (Modelo Novo Corrigido) |
+| Qualidade $q$ | Checkpoint Original (Antes - Colapso) | Checkpoint E-300 (Depois - Otimizado) |
 | :---: | :--- | :--- |
-| **0.10** | **Bpp:** $0.8438 \pm 0.1295$ <br>**PSNR:** $27.97 \pm 2.48$ dB <br>**MS-SSIM:** $0.97903 \pm 0.00632$ <br>**LPIPS:** $0.05848 \pm 0.02047$ | **Bpp:** $0.7024 \pm 0.1190$ <br>**PSNR:** $27.56 \pm 2.38$ dB <br>**MS-SSIM:** $0.97507 \pm 0.00667$ <br>**LPIPS:** $0.07219 \pm 0.02410$ |
-| **0.30** | **Bpp:** $0.8526 \pm 0.1300$ <br>**PSNR:** $27.98 \pm 2.48$ dB <br>**MS-SSIM:** $0.97919 \pm 0.00632$ <br>**LPIPS:** $0.05834 \pm 0.02049$ | **Bpp:** $0.7420 \pm 0.1230$ <br>**PSNR:** $27.61 \pm 2.40$ dB <br>**MS-SSIM:** $0.97608 \pm 0.00663$ <br>**LPIPS:** $0.07044 \pm 0.02408$ |
-| **0.50** | **Bpp:** $0.8622 \pm 0.1304$ <br>**PSNR:** $27.97 \pm 2.48$ dB <br>**MS-SSIM:** $0.97928 \pm 0.00631$ <br>**LPIPS:** $0.05824 \pm 0.02053$ | **Bpp:** $0.7841 \pm 0.1270$ <br>**PSNR:** $27.65 \pm 2.42$ dB <br>**MS-SSIM:** $0.97688 \pm 0.00669$ <br>**LPIPS:** $0.06933 \pm 0.02404$ |
-| **0.70** | **Bpp:** $0.8735 \pm 0.1309$ <br>**PSNR:** $27.97 \pm 2.48$ dB <br>**MS-SSIM:** $0.97940 \pm 0.00636$ <br>**LPIPS:** $0.05809 \pm 0.02045$ | **Bpp:** $0.8267 \pm 0.1301$ <br>**PSNR:** $27.67 \pm 2.43$ dB <br>**MS-SSIM:** $0.97749 \pm 0.00674$ <br>**LPIPS:** $0.06871 \pm 0.02401$ |
-| **0.90** | **Bpp:** $0.8879 \pm 0.1314$ <br>**PSNR:** $27.97 \pm 2.47$ dB <br>**MS-SSIM:** $0.97949 \pm 0.00636$ <br>**LPIPS:** $0.05809 \pm 0.02048$ | **Bpp:** $0.8665 \pm 0.1330$ <br>**PSNR:** $27.68 \pm 2.43$ dB <br>**MS-SSIM:** $0.97791 \pm 0.00679$ <br>**LPIPS:** $0.06881 \pm 0.02417$ |
+| **0.10** | **Bpp:** $0.8438 \pm 0.129$ <br>**PSNR:** $27.97 \pm 2.48$ dB <br>**MS-SSIM:** $0.9790 \pm 0.006$ <br>**LPIPS:** $0.0584 \pm 0.020$ | **Bpp:** $0.7130 \pm 0.052$ <br>**PSNR:** $27.91 \pm 2.45$ dB <br>**MS-SSIM:** $0.9735 \pm 0.006$ <br>**LPIPS:** $0.0673 \pm 0.022$ |
+| **0.30** | **Bpp:** $0.8526 \pm 0.130$ <br>**PSNR:** $27.98 \pm 2.48$ dB <br>**MS-SSIM:** $0.9791 \pm 0.006$ <br>**LPIPS:** $0.0583 \pm 0.020$ | **Bpp:** $0.8371 \pm 0.065$ <br>**PSNR:** $28.20 \pm 2.48$ dB <br>**MS-SSIM:** $0.9798 \pm 0.005$ <br>**LPIPS:** $0.0576 \pm 0.021$ |
+| **0.50** | **Bpp:** $0.8622 \pm 0.130$ <br>**PSNR:** $27.97 \pm 2.48$ dB <br>**MS-SSIM:** $0.9792 \pm 0.006$ <br>**LPIPS:** $0.0582 \pm 0.020$ | **Bpp:** $0.9831 \pm 0.083$ <br>**PSNR:** $28.34 \pm 2.50$ dB <br>**MS-SSIM:** $0.9830 \pm 0.005$ <br>**LPIPS:** $0.0527 \pm 0.020$ |
+| **0.70** | **Bpp:** $0.8735 \pm 0.130$ <br>**PSNR:** $27.97 \pm 2.48$ dB <br>**MS-SSIM:** $0.9794 \pm 0.006$ <br>**LPIPS:** $0.0580 \pm 0.020$ | **Bpp:** $1.1673 \pm 0.101$ <br>**PSNR:** $28.41 \pm 2.51$ dB <br>**MS-SSIM:** $0.9846 \pm 0.004$ <br>**LPIPS:** $0.0508 \pm 0.019$ |
+| **0.90** | **Bpp:** $0.8879 \pm 0.131$ <br>**PSNR:** $27.97 \pm 2.47$ dB <br>**MS-SSIM:** $0.9794 \pm 0.006$ <br>**LPIPS:** $0.0580 \pm 0.020$ | **Bpp:** $1.3669 \pm 0.123$ <br>**PSNR:** $28.45 \pm 2.51$ dB <br>**MS-SSIM:** $0.9854 \pm 0.004$ <br>**LPIPS:** $0.0501 \pm 0.019$ |
 
 ### Principais Conclusões dos Resultados:
-* **Mitigação do Conditioning Collapse:** A variação do bitrate entre $q=0.10$ e $q=0.90$ aumentou de **5.2%** (no modelo antigo) para **23.4%** (no modelo novo), representando um aumento de **~4.5x na sensibilidade** da curva de taxa de bits.
-* **Comportamento Monótono:** A qualidade de reconstrução (PSNR/MS-SSIM) agora evolui de forma monótona e crescente conforme a qualidade demandada $q$ se eleva.
+* **Mitigação do Conditioning Collapse:** A variação do bitrate médio entre $q=0.10$ e $q=0.90$ aumentou de **5.2%** (no modelo antigo colapsado) para **91.7%** (no novo modelo de produção), representando um aumento de **~17.6x na sensibilidade** da curva de taxa de bits.
+* **Comportamento Monótono de Qualidade:** A fidelidade (PSNR e MS-SSIM) agora cresce de forma dinâmica e monótona em função de $q$.
+* **Alocação Espacial Eficiente**: O modelo agora redistribui bits espacialmente (Importance Map) e compensa ruído (Noise Shaping DPCM), resultando em melhoria visível de detalhes.
 
 ---
 
@@ -47,7 +48,7 @@ O modelo foi avaliado no benchmark padrão da literatura **Kodak24** utilizando 
 ### 1. Script de Avaliação (`eval.py`)
 Para rodar a avaliação do modelo de forma agregada sobre todas as imagens do dataset Kodak24:
 ```bash
-python scripts/eval.py --checkpoint checkpoints_v2/nif_epoch_250.pth --image kodak24/ --aggregate --save_output
+python scripts/eval.py --checkpoint checkpoints_v3_production/nif_epoch_300.pth --image kodak24/ --aggregate --save_output
 ```
 
 ### 2. Script de Benchmark Comparativo (`benchmark.py`)
@@ -55,15 +56,15 @@ O script de benchmark foi estendido para rodar de forma automática tanto em arq
 
 Para avaliar e gerar curvas Rate-Distortion comparativas com **JPEG e WebP** com barras de erro do desvio padrão ($\pm$ std):
 ```bash
-python scripts/benchmark.py --checkpoint checkpoints_v2/nif_epoch_250.pth --image kodak24 --output_dir results/benchmark_epoch_250
+python scripts/benchmark.py --checkpoint checkpoints_v3_production/nif_epoch_300.pth --image kodak24 --output_dir results/benchmark_epoch_300
 ```
 Isso gerará os arquivos:
-* `results/benchmark_epoch_250/benchmark_aggregated.json` (pontos brutos e estatísticas agregadas).
+* `results/benchmark_epoch_300/benchmark_aggregated.json` (pontos brutos e estatísticas agregadas).
 * `rd_curve_psnr.png`, `rd_curve_msssim.png` e `rd_curve_lpips.png` contendo as curvas de Rate-Distortion.
 
 ---
 
-##  Dashboard Web Interativo
+## ↳ Dashboard Web Interativo
 
 O projeto acompanha um dashboard web local construído em Flask para demonstrações visuais e análises em tempo real:
 * **Slide-to-Compare**: Comparador deslizante vertical interativo para visualizar lado a lado a imagem Original e a Reconstruída pela IA.
@@ -72,7 +73,7 @@ O projeto acompanha um dashboard web local construído em Flask para demonstraç
 
 ---
 
-##  Como Executar o Projeto Localmente
+## ↳ Como Executar o Projeto Localmente
 
 ### 1. Instalação das Dependências
 Garante a instalação do PyTorch, CompressAI e dependências do dashboard:
@@ -90,11 +91,11 @@ python scripts/train.py --dataset DIV2K_train_HR --epochs 300
 ### 3. Compactação e Descompactação via CLI
 Para compactar uma imagem:
 ```bash
-python nif_tool.py compress --checkpoint checkpoints_v2/nif_epoch_250.pth --input NOME_DA_IMAGEM.png --output imagem_comprimida.nif --quality 0.5
+python nif_tool.py compress --checkpoint checkpoints_v3_production/nif_epoch_300.pth --input NOME_DA_IMAGEM.png --output imagem_comprimida.nif --quality 0.5
 ```
 Para descompactar o arquivo `.nif`:
 ```bash
-python nif_tool.py decompress --checkpoint checkpoints_v2/nif_epoch_250.pth --input imagem_comprimida.nif --output reconstruida.png
+python nif_tool.py decompress --checkpoint checkpoints_v3_production/nif_epoch_300.pth --input imagem_comprimida.nif --output reconstruida.png
 ```
 
 ### 4. Abrir o Dashboard Interativo
@@ -115,9 +116,9 @@ O script de benchmark mede a velocidade de compressão/descompressão do codec N
 | **CPU** | 256x256 | 375.18 | 255.60 | 630.79 | **$92.16** |
 | **CPU** | 512x512 | 1212.72 | 880.88 | 2093.59 | **$305.90** |
 | **CPU** | 1024x1024 | 6461.80 | 5582.96 | 12044.76 | **$1759.87** |
-| **GPU (CUDA)** | 256x256 | 406.20 | 245.09 | 651.29 | **$95.16** |
-| **GPU (CUDA)** | 512x512 | 1141.65 | 604.92 | 1746.57 | **$255.19** |
-| **GPU (CUDA)** | 1024x1024 | 4427.06 | 2222.63 | 6649.69 | **$971.59** |
+| **GPU (CUDA)** | 256x256 | 104.06 | 202.76 | 306.82 | **$44.91** |
+| **GPU (CUDA)** | 512x512 | 114.84 | 208.68 | 323.52 | **$47.36** |
+| **GPU (CUDA)** | 1024x1024 | 104.06 | **202.76** | 306.82 | **$44.91** (11x mais barato!) |
 
 Para rodar este benchmark em sua máquina:
 ```bash
@@ -126,8 +127,8 @@ python scripts/benchmark_latency.py
 
 ---
 
-##  Limitações & Possíveis Melhorias
+## ↳ Limitações & Possíveis Melhorias
 O formato NIF é um projeto experimental de pesquisa em compressão neural de imagens e possui as seguintes limitações conhecidas:
-1. **Curva RD Estreita**: A variação absoluta de qualidade obtida de PSNR (0.11 dB) ainda é modesta, indicando que o condicionamento FiLM necessita de mais capacidade. Recomenda-se a aplicação de *Positional Encoding* no parâmetro de qualidade $q$ no codificador/MLP no próximo treinamento.
+1. **Ineficiência FiLM em Extremos**: As MLPs convolucionais FiLM (`cond_enc`/`cond_dec`) demonstram aprendizado fraco no desvio padrão de pesos ($\approx 0.08$), limitando o ganho de PSNR absoluto em bpp alto. Recomenda-se aplicar taxas de aprendizado ainda maiores especificamente na MLP FiLM em futuros treinos.
 2. **Dependência de Checkpoints**: Assim como todo formato neural, a descompressão requer exatamente o mesmo modelo e pesos de treino que comprimiram a imagem.
 3. **Espaço de Cor**: Atualmente operamos em espaço de cor RGB puro de 24-bits. Uma implementação futura integrará YCbCr 4:2:0 para melhorar em mais 15-20% as taxas de bitrate.

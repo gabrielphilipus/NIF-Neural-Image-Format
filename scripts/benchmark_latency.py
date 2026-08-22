@@ -48,13 +48,16 @@ def measure_time(model, x, quality, device, runs=10, warmup=3):
 
 def main():
     checkpoint_path = 'checkpoints/nif_epoch_300.pth'
-    if not os.path.exists(checkpoint_path):
-        print(f"Erro: Checkpoint '{checkpoint_path}' não encontrado.")
-        return
+    load_checkpoint = os.path.exists(checkpoint_path)
+    
+    print("="*85)
+    print(" NIF BENCHMARK - LATÊNCIA, CUSTO OPERACIONAL (AWS) & PARALELISMO DE CONTEXTO")
+    print("="*85)
 
-    print("="*75)
-    print(" NIF BENCHMARK - LATÊNCIA & CUSTO OPERACIONAL (AWS)")
-    print("="*75)
+    if not load_checkpoint:
+        print("Aviso: Checkpoint 'checkpoints/nif_epoch_300.pth' não encontrado.")
+        print("Rodando benchmark de latência física com pesos inicializados aleatoriamente (latência idêntica).")
+        print("="*85)
 
     resolutions = [256, 512, 1024]
     devices = ["cpu"]
@@ -68,35 +71,39 @@ def main():
 
     for dev in devices:
         print(f"\nDispositivo de Execução: {dev.upper()}")
-        print("-" * 75)
-        print(f"{'Resolução':<10} | {'Encode (ms)':<12} | {'Decode (ms)':<12} | {'Total (ms)':<10} | {'Custo/1M Imgs (USD)':<20}")
-        print("-" * 75)
+        
+        for slices in [8, 4, 2, 1]:
+            print("\n" + "-" * 85)
+            print(f"Configuração: {slices} Slices de Canais | {slices * 2} Passos Seriais de Decodificação")
+            print("-" * 85)
+            print(f"{'Resolução':<10} | {'Encode (ms)':<12} | {'Decode (ms)':<12} | {'Total (ms)':<10} | {'Custo/1M Imgs (USD)':<20}")
+            print("-" * 85)
 
-        # Load model on target device
-        model = NIFCodec(num_filters=128, latent_dim=192, num_slices=8).to(dev)
-        checkpoint = torch.load(checkpoint_path, map_location=dev)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model.update()
-        model.eval()
+            # Load model on target device
+            model = NIFCodec(num_filters=128, latent_dim=192, num_slices=slices).to(dev)
+            if load_checkpoint and slices == 8:
+                try:
+                    checkpoint = torch.load(checkpoint_path, map_location=dev)
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                except Exception as e:
+                    print(f"Erro ao carregar o checkpoint: {e}")
+            
+            model.update(force=True)
+            model.eval()
 
-        for res in resolutions:
-            x = torch.randn(1, 3, res, res, device=dev)
-            quality = torch.tensor([[0.5]], device=dev)
+            for res in resolutions:
+                # O latente do NIFCodec exige resoluções múltiplas de 64
+                x = torch.randn(1, 3, res, res, device=dev)
+                quality = torch.tensor([[0.5]], device=dev)
 
-            try:
-                enc_t, dec_t = measure_time(model, x, quality, dev)
-                total_t = enc_t + dec_t
-                
-                # throughput = images per hour
-                # throughput = (3600 seconds * 1000 ms) / total_t
-                # cost per 1M images = (1,000,000 / throughput) * aws_hourly_rate
-                # Cost formula simplified: (total_t / 3,600,000) * 1,000,000 * aws_hourly_rate
-                cost_1m = (total_t / 3600000.0) * 1000000.0 * aws_hourly_rate
-
-                print(f"{f'{res}x{res}':<10} | {enc_t:<12.2f} | {dec_t:<12.2f} | {total_t:<10.2f} | ${cost_1m:<19.4f}")
-            except Exception as e:
-                print(f"{f'{res}x{res}':<10} | Erro: {e}")
-        print("-" * 75)
+                try:
+                    enc_t, dec_t = measure_time(model, x, quality, dev)
+                    total_t = enc_t + dec_t
+                    cost_1m = (total_t / 3600000.0) * 1000000.0 * aws_hourly_rate
+                    print(f"{f'{res}x{res}':<10} | {enc_t:<12.2f} | {dec_t:<12.2f} | {total_t:<10.2f} | ${cost_1m:<19.4f}")
+                except Exception as e:
+                    print(f"{f'{res}x{res}':<10} | Erro: {e}")
+            print("-" * 85)
 
 if __name__ == "__main__":
     main()

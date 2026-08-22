@@ -223,12 +223,23 @@ def main():
     model = NIFCodec(num_filters=128, latent_dim=192, num_slices=8).to(device)
     discriminator = NIFDiscriminator().to(device)
     
-    # CompressAI possui um otimizador específico ou parâmetros auxiliares no modelo
-    # Parâmetros de rede vs Parâmetros do modelo de entropia (quantização de hyperprior)
-    parameters = [p for n, p in model.named_parameters() if not n.endswith(".quantiles")]
-    aux_parameters = [p for n, p in model.named_parameters() if n.endswith(".quantiles")]
+    # Separação de parâmetros para Learning Rate diferenciada
+    cond_parameters = []
+    main_parameters = []
+    aux_parameters = []
 
-    optimizer = optim.Adam(parameters, lr=args.lr)
+    for n, p in model.named_parameters():
+        if n.endswith(".quantiles"):
+            aux_parameters.append(p)
+        elif "cond_enc" in n or "cond_dec" in n or "latent_scaler" in n:
+            cond_parameters.append(p)
+        else:
+            main_parameters.append(p)
+
+    optimizer = optim.Adam([
+        {"params": main_parameters, "lr": args.lr},
+        {"params": cond_parameters, "lr": args.lr * 5.0}
+    ], lr=args.lr)
     aux_optimizer = optim.Adam(aux_parameters, lr=1e-3)
     optimizer_d = optim.Adam(discriminator.parameters(), lr=args.lr * 0.5)
 
@@ -378,7 +389,7 @@ def main():
             total_g_loss.backward()
             
             # Gradient clipping para estabilização de treino
-            torch.nn.utils.clip_grad_norm_(parameters, max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(main_parameters + cond_parameters, max_norm=1.0)
             optimizer.step()
 
             # Passo de otimizador auxiliar do CompressAI (responsável pelas tabelas de probabilidade)

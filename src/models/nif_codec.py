@@ -62,29 +62,69 @@ class ChannelAttention(nn.Module):
         return x * y
 
 
+class SinusoidalEmbedding(nn.Module):
+    """
+    Gera representação sinusoidal (positional encoding) do parâmetro q.
+    """
+    def __init__(self, embedding_dim=16, temperature=10000.0):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        self.temperature = temperature
+        
+    def forward(self, q):
+        half_dim = self.embedding_dim // 2
+        emb = torch.arange(half_dim, dtype=torch.float32, device=q.device)
+        emb = torch.exp(emb * -(torch.log(torch.tensor(self.temperature, device=q.device)) / (half_dim - 1)))
+        args = q * emb.unsqueeze(0)
+        embedding = torch.cat([torch.sin(args), torch.cos(args)], dim=-1)
+        return embedding
+
+
 class QualityConditioningNetwork(nn.Module):
     """
     Rede MLP que converte o parâmetro de qualidade 'q' (0.1 a 1.0)
     em fatores de escala (scale) e translação (bias) para as camadas FiLM.
+    Utiliza SinusoidalEmbedding para mitigar o Conditioning Collapse.
     """
-    def __init__(self, out_features):
+    def __init__(self, out_features, embedding_dim=16):
         super().__init__()
+        self.embedding = SinusoidalEmbedding(embedding_dim=embedding_dim)
         self.fc = nn.Sequential(
-            nn.Linear(1, 32),
+            nn.Linear(embedding_dim, 64),
             nn.ReLU(inplace=True),
-            nn.Linear(32, 64),
+            nn.Linear(64, 64),
             nn.ReLU(inplace=True),
             nn.Linear(64, out_features * 2)
         )
         
     def forward(self, q):
         # q: [B, 1]
-        out = self.fc(q)
+        emb = self.embedding(q)
+        out = self.fc(emb)
         scale, bias = out.chunk(2, dim=1)
         # Reshape para broadcast em [B, C, H, W]
         scale = scale.unsqueeze(-1).unsqueeze(-1)
         bias = bias.unsqueeze(-1).unsqueeze(-1)
         return scale, bias
+
+
+class LatentScaling(nn.Module):
+    """
+    Módulo para prever um fator de escala multiplicativo por canal para o latente y,
+    com base na qualidade q. Força a quantização a ser sensível a q.
+    """
+    def __init__(self, channels):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(1, 32),
+            nn.ReLU(inplace=True),
+            nn.Linear(32, channels),
+            nn.Softplus()
+        )
+        
+    def forward(self, q):
+        scale = self.fc(q)
+        return scale.unsqueeze(-1).unsqueeze(-1)
 
 
 class FiLMBlock(nn.Module):
@@ -119,6 +159,8 @@ class NIFCodec(CompressionModel):
         self.cond_dec2 = QualityConditioningNetwork(num_filters)
         self.cond_dec3 = QualityConditioningNetwork(num_filters)
         self.cond_dec4 = QualityConditioningNetwork(3)
+
+        self.latent_scaler = LatentScaling(latent_dim)
 
         # 2. Análise (Encoder)
         self.enc_conv1 = nn.Conv2d(3, num_filters, kernel_size=5, stride=2, padding=2)
@@ -231,21 +273,25 @@ class NIFCodec(CompressionModel):
         scale_e4, bias_e4 = self.cond_enc4(quality)
         y = self.enc_ca4(self.enc_film4(self.enc_conv4(x_e3), scale_e4, bias_e4))
 
-        # C. Hyperprior (Análise do Latente)
+        # C. Latent Scaling
+        scale_y = self.latent_scaler(quality)
+        y_scaled = y * scale_y
+
+        # D. Hyperprior (Análise do Latente Escalado)
         z = self.hyper_enc_conv3(
             self.hyper_enc_relu2(
                 self.hyper_enc_conv2(
                     self.hyper_enc_relu1(
-                        self.hyper_enc_conv1(y)
+                        self.hyper_enc_conv1(y_scaled)
                     )
                 )
             )
         )
 
-        # D. Quantização e cálculo de probabilidade da Hyperprior
+        # E. Quantização e cálculo de probabilidade da Hyperprior
         z_hat, z_likelihoods = self.entropy_bottleneck(z)
 
-        # E. Decoder da Hyperprior (Síntese)
+        # F. Decoder da Hyperprior (Síntese)
         hyper_features = self.hyper_dec_conv3(
             self.hyper_dec_relu2(
                 self.hyper_dec_deconv2(
@@ -256,8 +302,11 @@ class NIFCodec(CompressionModel):
             )
         )
 
-        # F. Modelo de Entropia (Channel + Checkerboard) e quantização do latente principal
-        y_hat, y_likelihoods = self.entropy_model(y, hyper_features)
+        # G. Modelo de Entropia (Channel + Checkerboard) e quantização do latente principal
+        y_hat_scaled, y_likelihoods = self.entropy_model(y_scaled, hyper_features)
+
+        # H. Desfazer Latent Scaling
+        y_hat = y_hat_scaled / scale_y
 
         # G. Decoder (Síntese) com modulação de qualidade
         scale_d1, bias_d1 = self.cond_dec1(quality)
@@ -304,21 +353,25 @@ class NIFCodec(CompressionModel):
         scale_e4, bias_e4 = self.cond_enc4(quality)
         y = self.enc_ca4(self.enc_film4(self.enc_conv4(x_e3), scale_e4, bias_e4))
 
-        # B. Hyperprior (Análise do Latente)
+        # B. Latent Scaling
+        scale_y = self.latent_scaler(quality)
+        y_scaled = y * scale_y
+
+        # C. Hyperprior (Análise do Latente Escalado)
         z = self.hyper_enc_conv3(
             self.hyper_enc_relu2(
                 self.hyper_enc_conv2(
                     self.hyper_enc_relu1(
-                        self.hyper_enc_conv1(y)
+                        self.hyper_enc_conv1(y_scaled)
                     )
                 )
             )
         )
 
-        # C. Comprimir Hyperprior z
+        # D. Comprimir Hyperprior z
         z_strings = self.entropy_bottleneck.compress(z)
         
-        # D. Descomprimir z localmente para gerar as previsões do modelo de entropia
+        # E. Descomprimir z localmente para gerar as previsões do modelo de entropia
         z_hat = self.entropy_bottleneck.decompress(z_strings, z.shape[-2:])
         hyper_features = self.hyper_dec_conv3(
             self.hyper_dec_relu2(
@@ -330,8 +383,8 @@ class NIFCodec(CompressionModel):
             )
         )
 
-        # E. Comprimir latente principal y usando o contexto
-        y_strings = self.entropy_model.compress(y, hyper_features)
+        # F. Comprimir latente principal y_scaled usando o contexto
+        y_strings = self.entropy_model.compress(y_scaled, hyper_features)
 
         return {
             "strings": [z_strings, y_strings],
@@ -361,7 +414,11 @@ class NIFCodec(CompressionModel):
         # C. Decodificar y_hat usando o contexto condicionado
         # A resolução de y é 4 vezes a de z (nosso encoder tem 4 subamostragens e a hyperprior tem 2 adicionais)
         H_y, W_y = shape[0] * 4, shape[1] * 4
-        y_hat = self.entropy_model.decompress(y_strings, hyper_features, H_y, W_y)
+        y_hat_scaled = self.entropy_model.decompress(y_strings, hyper_features, H_y, W_y)
+
+        # D. Desfazer Latent Scaling
+        scale_y = self.latent_scaler(quality)
+        y_hat = y_hat_scaled / scale_y
 
         # D. Decoder (Síntese)
         scale_d1, bias_d1 = self.cond_dec1(quality)
